@@ -16,10 +16,11 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="bg-[#0b0f17] text-zinc-100 flex h-screen antialiased overflow-hidden select-none font-sans">
+<!-- Gunakan h-[100dvh] agar tinggi pas dengan layar dinamis HP -->
+<body class="bg-[#0b0f17] text-zinc-100 flex h-[100dvh] antialiased overflow-hidden select-none font-sans">
 
   <!-- BACKDROP GELAP (Khusus HP saat sidebar terbuka) -->
-  <div id="sidebarBackdrop" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden md:hidden transition-opacity duration-300"></div>
+  <div id="sidebarBackdrop" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden md:hidden"></div>
 
   <!-- SIDEBAR: Drawer melayang di HP, Kolom normal di PC/Laptop -->
   <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-50 w-72 sm:w-80 bg-[#111622] border-r border-slate-800/80 flex flex-col -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out shrink-0 h-full shadow-2xl md:shadow-none">
@@ -42,7 +43,6 @@
         <button id="newChatBtn" title="Chat Baru" class="p-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-slate-300 hover:text-white transition">
           <i data-lucide="plus" class="w-4 h-4"></i>
         </button>
-        <!-- Tombol Tutup Khusus HP -->
         <button id="closeSidebarMobileBtn" title="Tutup Menu" class="p-2 rounded-lg bg-slate-800/70 text-slate-400 hover:text-white md:hidden transition">
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
@@ -59,13 +59,10 @@
     </div>
 
     <!-- Riwayat Dokumen & Sesi Percakapan -->
-    <div class="flex-1 overflow-y-auto p-2.5 space-y-1" id="historyList">
-      <!-- Item Sesi Chat dinamis -->
-    </div>
+    <div class="flex-1 overflow-y-auto p-2.5 space-y-1" id="historyList"></div>
 
     <!-- Status Cloud Sync & Akses Pengaturan -->
     <div class="p-3 border-t border-slate-800/80 bg-[#0d121c] space-y-2 text-xs">
-      <!-- Tombol Google Drive Sync -->
       <button id="gdriveSyncBtn" class="w-full flex items-center justify-between px-3 py-2 text-slate-300 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 rounded-lg transition">
         <div class="flex items-center gap-2">
           <i data-lucide="cloud" class="w-4 h-4 text-slate-400" id="syncCloudIcon"></i>
@@ -74,7 +71,6 @@
         <span id="syncBadge" class="w-2 h-2 rounded-full bg-slate-600"></span>
       </button>
 
-      <!-- Import / Export Bar -->
       <div class="grid grid-cols-2 gap-1.5 pt-0.5">
         <input type="file" id="importFileInput" accept=".json" class="hidden">
         <button id="importBtn" class="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-md transition font-medium">
@@ -87,7 +83,6 @@
         </button>
       </div>
 
-      <!-- Trigger Modal Pengaturan -->
       <button id="openSettingsBtn" class="w-full flex items-center justify-between px-3 py-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded-lg transition">
         <div class="flex items-center gap-2">
           <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
@@ -99,7 +94,7 @@
   </aside>
 
   <!-- WORKSPACE CHAT UTAMA -->
-  <main class="flex-1 flex flex-col h-full bg-[#0b0f17] relative overflow-hidden min-w-0">
+  <main class="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
     
     <!-- Top Header -->
     <header class="h-14 border-b border-slate-800/80 px-3 sm:px-4 flex items-center justify-between bg-[#0b0f17]/90 backdrop-blur z-10 shrink-0">
@@ -120,32 +115,32 @@
       </div>
     </header>
 
-    <!-- Area Feed Percakapan -->
-    <div id="chatMessages" class="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl w-full mx-auto select-text">
-      <!-- Empty State -->
-      <div id="welcomeMessage" class="flex flex-col items-center justify-center h-full text-center py-12 sm:py-20 px-2">
-        <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-slate-900 to-[#161d2d] border border-slate-800 flex items-center justify-center text-teal-400 mb-4 shadow-xl">
-          <i data-lucide="file-search" class="w-7 h-7 sm:w-8 sm:h-8"></i>
+    <!-- Area Feed Percakapan (Wajib min-h-0 agar flex tidak meluber ke bawah) -->
+    <div id="chatMessages" class="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl w-full mx-auto select-text">
+      <!-- Empty State dengan padding ringkas di HP -->
+      <div id="welcomeMessage" class="flex flex-col items-center justify-center h-full text-center py-6 sm:py-16 px-2">
+        <div class="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-slate-900 to-[#161d2d] border border-slate-800 flex items-center justify-center text-teal-400 mb-3 sm:mb-4 shadow-xl shrink-0">
+          <i data-lucide="file-search" class="w-6 h-6 sm:w-8 sm:h-8"></i>
         </div>
         <h3 class="text-sm sm:text-base font-semibold text-slate-100 mb-1">Agent AI Dothey: Private AI RAG Workspace</h3>
-        <p class="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
+        <p class="text-xs text-slate-400 max-w-md mb-4 sm:mb-6 leading-relaxed">
           Unggah dokumen PDF, teks, data CSV, atau gambar langsung. Model Dothey AI Pro membaca dan mengekstrak jawaban langsung dari berkas Anda secara terenkripsi di browser.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left max-w-lg w-full">
-          <div class="p-3 rounded-xl border border-slate-800/80 bg-slate-900/50 text-xs text-slate-300 flex items-start gap-2.5">
+          <div class="p-2.5 sm:p-3 rounded-xl border border-slate-800/80 bg-slate-900/50 text-xs text-slate-300 flex items-start gap-2.5">
             <i data-lucide="paperclip" class="w-4 h-4 text-teal-400 mt-0.5 shrink-0"></i>
             <span><strong>Upload & RAG:</strong> Unggah File PDF/CSV lalu tanyakan apa saja.</span>
           </div>
-          <div class="p-3 rounded-xl border border-slate-800/80 bg-slate-900/50 text-xs text-slate-300 flex items-start gap-2.5">
+          <div class="p-2.5 sm:p-3 rounded-xl border border-slate-800/80 bg-slate-900/50 text-xs text-slate-300 flex items-start gap-2.5">
             <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400 mt-0.5 shrink-0"></i>
-            <span><strong>Privasi Klien:</strong> Tanpa database perantara. Data tidak tersimpan dicloud hanya tersimpan di browser & Google Drive pribadi.</span>
+            <span><strong>Privasi Klien:</strong> Data hanya tersimpan di browser & Google Drive pribadi.</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- INPUT BAR DENGAN RAG FILE TRAY -->
-    <div class="p-2 sm:p-4 bg-[#0b0f17]/95 border-t border-slate-800/80 max-w-4xl w-full mx-auto shrink-0">
+    <!-- KOTAK INPUT (Wajib shrink-0 agar selalu tampil di bagian bawah layar) -->
+    <div class="p-2 sm:p-4 bg-[#0b0f17]/95 border-t border-slate-800/80 max-w-4xl w-full mx-auto shrink-0 z-10">
       
       <!-- Staged Files Preview -->
       <div id="stagedFilesContainer" class="hidden flex flex-wrap gap-2 mb-2 p-2 bg-[#121824] border border-slate-800 rounded-xl"></div>
@@ -153,12 +148,12 @@
       <form id="chatForm" class="relative flex items-end bg-[#121824] border border-slate-800 focus-within:border-teal-500/60 rounded-2xl p-1.5 sm:p-2 transition shadow-xl">
         <input type="file" id="fileAttachmentInput" multiple accept=".pdf,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp" class="hidden">
         
-        <button type="button" id="attachBtn" title="Lampirkan Dokumen (PDF, Teks, CSV, Gambar)" class="p-2 text-slate-400 hover:text-teal-400 hover:bg-slate-800/60 rounded-xl transition shrink-0 mr-1">
+        <button type="button" id="attachBtn" title="Lampirkan Dokumen" class="p-2 text-slate-400 hover:text-teal-400 hover:bg-slate-800/60 rounded-xl transition shrink-0 mr-1">
           <i data-lucide="paperclip" class="w-4 h-4"></i>
         </button>
 
         <textarea id="promptInput" rows="1" placeholder="Tanyakan dokumen terlampir atau ketik prompt..."
-          class="flex-1 bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none resize-none px-2 py-1.5 max-h-36 sm:max-h-48"></textarea>
+          class="flex-1 bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none resize-none px-2 py-1.5 max-h-32 sm:max-h-48"></textarea>
 
         <button type="submit" id="sendBtn" class="p-2 sm:p-2.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-slate-950 font-bold rounded-xl transition disabled:opacity-40 shadow-sm shrink-0">
           <i data-lucide="arrow-up" class="w-4 h-4 stroke-[2.8]"></i>
