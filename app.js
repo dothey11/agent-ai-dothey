@@ -1,23 +1,24 @@
-// Storage Keys
-//const SESSIONS_KEY = "dothey_rag_sessions_v2";
-//const SETTINGS_KEY = "dothey_rag_settings_v2";
+/**
+ * Agent AI Dothey - Private Workspace Client
+ * Engine: Google Gemini Pro API via Client-Side In-Context RAG
+ * Storage: Local IndexedDB (Kapasitas Besar) & Cloud Sync (Google Drive AppData)
+ */
 
-// State
-//let sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
-//let activeSessionId = null;
-//let stagedFiles = []; // Berkas yang sedang diantrekan sebelum kirim
-
-const SETTINGS_KEY = "dothey_rag_settings_v2";
-
-// Inisialisasi IndexedDB (Kapasitas hingga Gigabyte)
+// =========================================================================
+// 1. INISIALISASI DATABASE LOKAL (IndexedDB)
+// =========================================================================
 const DB_NAME = "AgentDotheyDB";
 const DB_VERSION = 1;
 const STORE_NAME = "chat_sessions";
+const SETTINGS_KEY = "dothey_rag_settings_v2";
 
-let sessions = []; // Diisi otomatis secara asinkron dari IndexedDB
+let sessions = [];
 let activeSessionId = null;
 let stagedFiles = [];
+let gdriveToken = null;
+let tokenClient = null;
 
+// Membuka koneksi basis data IndexedDB
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -32,6 +33,7 @@ function openDB() {
   });
 }
 
+// Mengambil seluruh percakapan yang tersimpan
 async function getAllSessionsFromDB() {
   const db = await openDB();
   return new Promise((resolve) => {
@@ -42,47 +44,51 @@ async function getAllSessionsFromDB() {
   });
 }
 
+// Menyimpan satu sesi obrolan
 async function saveSessionToDB(session) {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).put(session);
 }
 
-//async function bulkSaveSessionsToDB(newSessions) {
-//  const db = await openDB();
-//  const tx = db.transaction(STORE_NAME, "readwrite");
-//  const store = tx.objectStore(STORE_NAME);
-//  newSessions.forEach(s => store.put(s));
-//}
+// Menyimpan banyak sesi sekaligus (digunakan saat Impor)
 async function bulkSaveSessionsToDB(newSessions) {
   const db = await openDB();
-  const tx = db.transaction(STORE_NAME, "readwrite");
-  const store = tx.objectStore(STORE_NAME);
-
-  newSessions.forEach((s, idx) => {
-    // Pastikan 'id' selalu ada agar tidak ditolak IndexedDB
-    if (!s.id) {
-      s.id = "session_" + Date.now() + "_" + idx + "_" + Math.random().toString(36).substring(2, 7);
-    }
-    store.put(s);
-  });
-
   return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+
+    newSessions.forEach((s, idx) => {
+      if (!s.id) {
+        s.id = "session_" + Date.now() + "_" + idx + "_" + Math.random().toString(36).substring(2, 7);
+      }
+      store.put(s);
+    });
+
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
+// Menghapus satu sesi dari database
 async function deleteSessionFromDB(id) {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).delete(id);
 }
 
+// Mengosongkan seluruh database (pembersihan sebelum re-impor)
+async function clearAllSessionsFromDB() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
-let gdriveToken = null;
-let tokenClient = null;
-
+// Konfigurasi aplikasi default
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
   apiKey: "",
   model: "gemini-1.5-pro",
@@ -90,7 +96,9 @@ let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
   systemInstruction: "Anda adalah Agent AI Dothey, asisten analitik tingkat lanjut yang mampu meneliti dokumen RAG, mengekstrak data dari berkas yang diunggah, dan memberikan jawaban terstruktur dengan akurasi tinggi."
 }));
 
-// DOM Elements
+// =========================================================================
+// 2. REFERENSI ELEMEN DOM
+// =========================================================================
 const sidebar = document.getElementById("sidebar");
 const toggleSidebarBtn = document.getElementById("toggleSidebar");
 const historyList = document.getElementById("historyList");
@@ -103,12 +111,12 @@ const promptInput = document.getElementById("promptInput");
 const chatForm = document.getElementById("chatForm");
 const sendBtn = document.getElementById("sendBtn");
 
-// File Attachment Elements
+// Elemen Lampiran Berkas
 const attachBtn = document.getElementById("attachBtn");
 const fileAttachmentInput = document.getElementById("fileAttachmentInput");
 const stagedFilesContainer = document.getElementById("stagedFilesContainer");
 
-// Settings Modal Elements
+// Elemen Modal Pengaturan
 const openSettingsBtn = document.getElementById("openSettingsBtn");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
@@ -120,44 +128,30 @@ const clientIdInput = document.getElementById("clientIdInput");
 const systemInstructionInput = document.getElementById("systemInstructionInput");
 const modelIndicatorBadge = document.getElementById("modelIndicatorBadge");
 
-// Drive Sync Elements
+// Elemen Sinkronisasi Google Drive
 const gdriveSyncBtn = document.getElementById("gdriveSyncBtn");
 const syncStatusText = document.getElementById("syncStatusText");
 const syncBadge = document.getElementById("syncBadge");
 const syncCloudIcon = document.getElementById("syncCloudIcon");
 
-// Export & Import
+// Elemen Ekspor dan Impor
 const importBtn = document.getElementById("importBtn");
 const importFileInput = document.getElementById("importFileInput");
 const exportAllBtn = document.getElementById("exportAllBtn");
 const exportSingleMdBtn = document.getElementById("exportSingleMdBtn");
 const clearChatBtn = document.getElementById("clearChatBtn");
 
-// Inisialisasi
-//function init() {
-//  lucide.createIcons();
-//  apiKeyInput.value = settings.apiKey || "";
-//  modelSelect.value = settings.model || "gemini-1.5-pro";
-//  clientIdInput.value = settings.clientId || "";
-//  systemInstructionInput.value = settings.systemInstruction || "";
-//  modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
-
-//  if (sessions.length === 0) {
-//    createNewSession();
-//  } else {
-//    loadSession(sessions[0].id);
-//  }
-//  renderHistory();
-//}
+// =========================================================================
+// 3. INISIALISASI & MANAJEMEN SESI PERCAKAPAN
+// =========================================================================
 async function init() {
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
   apiKeyInput.value = settings.apiKey || "";
   modelSelect.value = settings.model || "gemini-1.5-pro";
   clientIdInput.value = settings.clientId || "";
   systemInstructionInput.value = settings.systemInstruction || "";
   modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
 
-  // Ambil data chat dari IndexedDB
   sessions = await getAllSessionsFromDB();
   sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
@@ -169,9 +163,6 @@ async function init() {
   renderHistory();
 }
 
-
-
-// Session Management
 function createNewSession() {
   const newSession = {
     id: "dothey_" + Date.now(),
@@ -180,6 +171,7 @@ function createNewSession() {
     messages: []
   };
   sessions.unshift(newSession);
+  activeSessionId = newSession.id;
   saveSessions();
   loadSession(newSession.id);
   renderHistory();
@@ -195,25 +187,7 @@ function loadSession(id) {
   renderHistory();
 }
 
-//function saveSessions() {
-//  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-//  pushToDrive();
-//}
-
-//function deleteSession(id) {
-//  sessions = sessions.filter(s => s.id !== id);
-//  saveSessions();
-//  if (sessions.length === 0) {
-//    createNewSession();
-//  } else if (activeSessionId === id) {
-//    loadSession(sessions[0].id);
-//  } else {
-//    renderHistory();
-//  }
-//}
-
 async function saveSessions() {
-  // Simpan sesi aktif ke IndexedDB bukan localStorage
   const current = sessions.find(s => s.id === activeSessionId);
   if (current) {
     await saveSessionToDB(current);
@@ -233,13 +207,12 @@ async function deleteSession(id) {
   }
 }
 
-
-// Render Riwayat di Sidebar
+// Menampilkan daftar riwayat percakapan di bilah sisi
 function renderHistory(filterText = "") {
   historyList.innerHTML = "";
   const query = filterText.toLowerCase();
 
-  const filtered = sessions.filter(s => 
+  const filtered = sessions.filter(s =>
     s.title.toLowerCase().includes(query) ||
     s.messages.some(m => m.content && m.content.toLowerCase().includes(query))
   );
@@ -277,10 +250,12 @@ function renderHistory(filterText = "") {
     historyList.appendChild(item);
   });
 
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
 }
 
-// Tampilan Chat Feed
+// =========================================================================
+// 4. RENDERING TAMPILAN PESAN & MARKDOWN
+// =========================================================================
 function renderMessages(messages) {
   chatMessages.innerHTML = "";
   if (!messages || messages.length === 0) {
@@ -306,7 +281,7 @@ function appendMessageUI(role, content, files = []) {
     ? "bg-gradient-to-r from-teal-950/70 to-emerald-950/60 border border-teal-800/40 rounded-2xl px-4 py-2.5 max-w-[85%] text-slate-100 shadow-md"
     : "prose-custom max-w-[92%] text-slate-200 bg-transparent py-1 w-full";
 
-  // Jika ada file terlampir, render chip dokumen di dalam chat bubble
+  // Chip dokumen jika terdapat lampiran berkas
   if (files && files.length > 0) {
     const fileContainer = document.createElement("div");
     fileContainer.className = "flex flex-wrap gap-2 mb-2 pb-2 border-b border-teal-800/30";
@@ -331,57 +306,87 @@ function appendMessageUI(role, content, files = []) {
   wrapper.appendChild(messageBox);
   chatMessages.appendChild(wrapper);
   chatMessages.scrollTop = chatMessages.scrollHeight;
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
   return textNode;
 }
 
-// Markdown & Code Blocks
+// Memproses sintaks Markdown dan membungkus blok kode (Perbaikan pencegahan null insertBefore)
 function renderMarkdownWithCodeBlocks(markdownText) {
-  const rawHtml = marked.parse(markdownText || "");
+  if (!markdownText) return "";
+
+  let rawHtml = "";
+  try {
+    rawHtml = (typeof marked !== "undefined" && marked.parse)
+      ? marked.parse(markdownText)
+      : markdownText;
+  } catch (err) {
+    rawHtml = markdownText;
+  }
+
   const temp = document.createElement("div");
   temp.innerHTML = rawHtml;
 
-  temp.querySelectorAll("pre code").forEach((block) => {
-    hljs.highlightElement(block);
-    const pre = block.parentElement;
-    const lang = block.className.match(/language-(\w+)/)?.[1] || "code";
+  // Mengakses elemen pre secara langsung untuk menghindari referensi parentNode yang null
+  const preElements = Array.from(temp.querySelectorAll("pre"));
+  preElements.forEach((pre) => {
+    if (pre.parentElement && pre.parentElement.classList.contains("code-container")) {
+      return;
+    }
+
+    const parent = pre.parentNode;
+    if (!parent) return;
+
+    const codeBlock = pre.querySelector("code");
+    if (codeBlock && window.hljs) {
+      try {
+        hljs.highlightElement(codeBlock);
+      } catch (err) {
+        // Mengabaikan galat penyorotan sintaksis
+      }
+    }
+
+    const lang = codeBlock?.className.match(/language-(\w+)/)?.[1] || "code";
 
     const container = document.createElement("div");
     container.className = "code-container";
     container.innerHTML = `
       <div class="code-header">
         <span>${lang}</span>
-        <button class="copy-code-btn hover:text-white transition flex items-center gap-1">
+        <button type="button" class="copy-code-btn hover:text-white transition flex items-center gap-1">
           <i data-lucide="copy" class="w-3 h-3"></i> Salin
         </button>
       </div>
     `;
-    pre.parentNode.insertBefore(container, pre);
+
+    parent.insertBefore(container, pre);
     container.appendChild(pre);
   });
 
   return temp.innerHTML;
 }
 
+// Menyiapkan tombol salin kode program
 function setupCopyCodeButtons(container) {
   container.querySelectorAll(".copy-code-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const code = btn.closest(".code-container").querySelector("pre code").innerText;
-      navigator.clipboard.writeText(code);
-      btn.innerHTML = `<i data-lucide="check" class="w-3 h-3 text-teal-400"></i> Disalin!`;
-      lucide.createIcons();
-      setTimeout(() => {
-        btn.innerHTML = `<i data-lucide="copy" class="w-3 h-3"></i> Salin`;
-        lucide.createIcons();
-      }, 2000);
-    });
+    btn.onclick = () => {
+      const codeEl = btn.closest(".code-container")?.querySelector("pre code");
+      if (!codeEl) return;
+      navigator.clipboard.writeText(codeEl.innerText).then(() => {
+        btn.innerHTML = `<i data-lucide="check" class="w-3 h-3 text-teal-400"></i> Disalin!`;
+        if (window.lucide) lucide.createIcons();
+        setTimeout(() => {
+          btn.innerHTML = `<i data-lucide="copy" class="w-3 h-3"></i> Salin`;
+          if (window.lucide) lucide.createIcons();
+        }, 2000);
+      });
+    };
   });
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
 }
 
-// -------------------------------------------------------------
-// LOGIKA RAG & MULTIMODAL FILE UPLOAD (Client-Side)
-// -------------------------------------------------------------
+// =========================================================================
+// 5. IN-CONTEXT RAG & PENGOLAHAN BERKAS TERLAMPIR
+// =========================================================================
 attachBtn.addEventListener("click", () => fileAttachmentInput.click());
 
 fileAttachmentInput.addEventListener("change", async (e) => {
@@ -394,11 +399,11 @@ fileAttachmentInput.addEventListener("change", async (e) => {
 });
 
 async function processSelectedFile(file) {
-  const isText = file.type.includes("text") || 
-                 file.name.endsWith(".txt") || 
-                 file.name.endsWith(".md") || 
-                 file.name.endsWith(".csv") || 
-                 file.name.endsWith(".json");
+  const isText = file.type.includes("text") ||
+    file.name.endsWith(".txt") ||
+    file.name.endsWith(".md") ||
+    file.name.endsWith(".csv") ||
+    file.name.endsWith(".json");
 
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -415,7 +420,6 @@ async function processSelectedFile(file) {
       };
       reader.readAsText(file);
     } else {
-      // PDF atau Gambar (Base64)
       reader.onload = (e) => {
         const base64Data = e.target.result.split(",")[1];
         stagedFiles.push({
@@ -457,12 +461,12 @@ function renderStagedFiles() {
     });
     stagedFilesContainer.appendChild(chip);
   });
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
 }
 
-// -------------------------------------------------------------
-// PENGIRIMAN PROMPT & DOKUMEN KE GEMINI PRO API
-// -------------------------------------------------------------
+// =========================================================================
+// 6. INTEGRASI GOOGLE GEMINI PRO API
+// =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
     throw new Error("API Key belum dipasang. Klik Pengaturan untuk memasukkan Google Gemini API Key.");
@@ -470,11 +474,9 @@ async function sendToGemini(historyMessages) {
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${settings.apiKey}`;
 
-  // Membangun payload multimodal / RAG
   const contents = historyMessages.map(m => {
     const parts = [];
 
-    // Jika pesan memiliki berkas terlampir (RAG)
     if (m.files && m.files.length > 0) {
       m.files.forEach(f => {
         if (f.isText) {
@@ -525,7 +527,7 @@ async function sendToGemini(historyMessages) {
   return data.candidates[0].content.parts[0].text;
 }
 
-// Handle Form Submit
+// Penanganan pengiriman prompt
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = promptInput.value.trim();
@@ -572,11 +574,12 @@ chatForm.addEventListener("submit", async (e) => {
   }
 });
 
-// Auto-expand Textarea
+// Penyesuaian otomatis tinggi kotak pengetikan teks
 promptInput.addEventListener("input", () => {
   promptInput.style.height = "auto";
   promptInput.style.height = promptInput.scrollHeight + "px";
 });
+
 promptInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
@@ -584,9 +587,9 @@ promptInput.addEventListener("keydown", (e) => {
   }
 });
 
-// -------------------------------------------------------------
-// SINKRONISASI GOOGLE DRIVE (OTOMATIS HP & LAPTOP)
-// -------------------------------------------------------------
+// =========================================================================
+// 7. SINKRONISASI GOOGLE DRIVE (Otomatis Multi-Device)
+// =========================================================================
 function initGoogleAuth() {
   if (!window.google || !settings.clientId) return;
 
@@ -657,7 +660,6 @@ async function pullFromDrive() {
 
       if (updated) {
         sessions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        //localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
         await bulkSaveSessionsToDB(sessions);
         renderHistory();
         if (activeSessionId) loadSession(activeSessionId);
@@ -715,9 +717,9 @@ async function pushToDrive() {
   }
 }
 
-// -------------------------------------------------------------
-// PENGATURAN & EXPORT/IMPORT
-// -------------------------------------------------------------
+// =========================================================================
+// 8. PENGATURAN KREDENSIAL & PROFIL APLIKASI
+// =========================================================================
 openSettingsBtn.addEventListener("click", () => settingsModal.classList.remove("hidden"));
 closeSettingsBtn.addEventListener("click", () => settingsModal.classList.add("hidden"));
 
@@ -739,34 +741,10 @@ toggleApiKeyVis.addEventListener("click", () => {
 
 searchHistoryInput.addEventListener("input", (e) => renderHistory(e.target.value));
 
+// =========================================================================
+// 9. IMPOR ARSIP GOOGLE TAKEOUT & PARSING CERDAS THREAD
+// =========================================================================
 importBtn.addEventListener("click", () => importFileInput.click());
-//importFileInput.addEventListener("change", (e) => {
-//  const file = e.target.files[0];
-//  if (!file) return;
-
-//  const reader = new FileReader();
-//  reader.onload = (event) => {
-//    try {
-//      const data = JSON.parse(event.target.result);
-//      if (Array.isArray(data)) {
-//        sessions = [...data, ...sessions];
-//      } else if (data.messages) {
-//        sessions.unshift(data);
-//      }
-//      saveSessions();
-//      loadSession(sessions[0].id);
-//      renderHistory();
-//      alert("Riwayat berhasil diimpor!");
-//    } catch (err) {
-//      alert("Format JSON tidak valid: " + err.message);
-//    }
-//  };
-//  reader.readAsText(file);
-//});
-// GANTI BLOK importFileInput.addEventListener LAMA DENGAN INI:
-// GANTI SELURUH BLOK importFileInput.addEventListener DI app.js DENGAN KODE INI:
-
-// GANTI SELURUH BLOK importFileInput.addEventListener DI app.js DENGAN INI:
 
 importFileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
@@ -775,31 +753,29 @@ importFileInput.addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = async (event) => {
     try {
-      let rawData = JSON.parse(event.target.result);
-      let rawList = Array.isArray(rawData) ? rawData : (rawData.conversations || [rawData]);
+      const rawData = JSON.parse(event.target.result);
+      const rawList = Array.isArray(rawData) ? rawData : (rawData.conversations || [rawData]);
 
       if (rawList.length === 0) throw new Error("Berkas JSON kosong.");
 
-      // 1. Saring entri sampah sistem (seperti 'Cleared previous feedback')
+      // 1. Saring entri non-percakapan (seperti 'Cleared previous feedback')
       const validLogs = rawList.filter(item => {
         const title = (item.title || item.name || "").trim().toLowerCase();
         if (title === "cleared previous feedback") return false;
-        
-        // Entri harus memiliki pertanyaan atau teks balasan dari safeHtmlItem
+
         const hasPrompt = title.startsWith("prompted") || title.length > 0;
         const hasResponse = item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0;
         return hasPrompt || hasResponse;
       });
 
-      // 2. Urutkan secara kronologis (dari obrolan pertama ke obrolan terakhir)
+      // 2. Susun secara kronologis
       validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 
-      // 3. Kelompokkan obrolan berdasarkan Thread ID sesi Google Gemini
+      // 3. Kelompokkan ke dalam satu sesi utuh berdasarkan URL sesi Gemini
       const threadMap = new Map();
 
       validLogs.forEach((item, idx) => {
-        // A. Ambil teks Prompt Pengguna
-        let rawTitle = (item.title || item.name || "").trim();
+        const rawTitle = (item.title || item.name || "").trim();
         let promptText = rawTitle
           .replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "")
           .trim();
@@ -808,7 +784,7 @@ importFileInput.addEventListener("change", (e) => {
           promptText = item.messages[0].content;
         }
 
-        // B. Ambil Jawaban Gemini Asli (KUNCI: Ekstrak dari safeHtmlItem)
+        // Ekstraksi jawaban Gemini dari properti safeHtmlItem asli Google Takeout
         let responseContent = "";
         if (item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0) {
           responseContent = item.safeHtmlItem.map(s => s.html || "").join("\n\n");
@@ -822,7 +798,6 @@ importFileInput.addEventListener("change", (e) => {
           responseContent = "*(Tidak ada rekaman respon untuk perintah ini)*";
         }
 
-        // C. Ambil ID Thread Sesi Gemini dari details[0].url
         let targetUrl = item.titleUrl || "";
         if (!targetUrl && item.details && Array.isArray(item.details) && item.details.length > 0) {
           targetUrl = item.details[0].url || item.details[0].name || "";
@@ -835,14 +810,11 @@ importFileInput.addEventListener("change", (e) => {
         } else if (item.id) {
           threadId = item.id;
         } else {
-          // Fallback jika tidak ada link app/
           const cleanTitle = promptText.slice(0, 24).toLowerCase().replace(/[^a-z0-9]/g, "_");
           threadId = "session_" + (item.time || "legacy").slice(0, 10) + "_" + cleanTitle;
         }
 
-        // D. Gabungkan pertanyaan dan jawaban ke dalam satu ruang obrolan utuh
         if (!threadMap.has(threadId)) {
-          // Buat sesi baru (Judul sidebar diambil dari pertanyaan pertama)
           const firstTitle = promptText.slice(0, 38) + (promptText.length > 38 ? "..." : "");
           threadMap.set(threadId, {
             id: threadId,
@@ -854,7 +826,6 @@ importFileInput.addEventListener("change", (e) => {
             ]
           });
         } else {
-          // Jika pertanyaan lanjutan dalam topik yang sama, sambungkan ke bawahnya
           const existingThread = threadMap.get(threadId);
           existingThread.messages.push({ role: "user", content: promptText || "Pertanyaan Lanjutan" });
           existingThread.messages.push({ role: "model", content: responseContent });
@@ -867,22 +838,17 @@ importFileInput.addEventListener("change", (e) => {
         throw new Error("Tidak ada data percakapan yang valid untuk diimpor.");
       }
 
-      // 4. Bersihkan database IndexedDB lama agar duplikat hilang total
-      const db = await openDB();
-      const txClear = db.transaction(STORE_NAME, "readwrite");
-      await txClear.objectStore(STORE_NAME).clear();
-
-      // 5. Simpan seluruh sesi percakapan yang sudah digabung rapi
+      // Bersihkan IndexedDB sebelum memasukkan data hasil pengelompokan
+      await clearAllSessionsFromDB();
       await bulkSaveSessionsToDB(formattedSessions);
 
-      // 6. Muat ulang tampilan UI
       sessions = await getAllSessionsFromDB();
       sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
       loadSession(sessions[0].id);
       renderHistory();
 
-      alert(`Berhasil! ${validLogs.length} aktivitas log telah digabungkan menjadi ${formattedSessions.length} percakapan utuh dengan seluruh isi teks respon.`);
+      alert(`Berhasil! ${validLogs.length} aktivitas log telah digabungkan menjadi ${formattedSessions.length} sesi percakapan utuh.`);
     } catch (err) {
       alert("Gagal memproses berkas: " + err.message);
     } finally {
@@ -892,7 +858,9 @@ importFileInput.addEventListener("change", (e) => {
   reader.readAsText(file);
 });
 
-
+// =========================================================================
+// 10. EKSPOR DOKUMEN (JSON / Markdown) & PENGHAPUSAN
+// =========================================================================
 exportAllBtn.addEventListener("click", () => {
   const a = document.createElement("a");
   const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: "application/json" });
