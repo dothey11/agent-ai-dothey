@@ -1,11 +1,67 @@
 // Storage Keys
-const SESSIONS_KEY = "dothey_rag_sessions_v2";
-const SETTINGS_KEY = "dothey_rag_settings_v2";
+//const SESSIONS_KEY = "dothey_rag_sessions_v2";
+//const SETTINGS_KEY = "dothey_rag_settings_v2";
 
 // State
-let sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
+//let sessions = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]");
+//let activeSessionId = null;
+//let stagedFiles = []; // Berkas yang sedang diantrekan sebelum kirim
+
+const SETTINGS_KEY = "dothey_rag_settings_v2";
+
+// Inisialisasi IndexedDB (Kapasitas hingga Gigabyte)
+const DB_NAME = "AgentDotheyDB";
+const DB_VERSION = 1;
+const STORE_NAME = "chat_sessions";
+
+let sessions = []; // Diisi otomatis secara asinkron dari IndexedDB
 let activeSessionId = null;
-let stagedFiles = []; // Berkas yang sedang diantrekan sebelum kirim
+let stagedFiles = [];
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getAllSessionsFromDB() {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+
+async function saveSessionToDB(session) {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  tx.objectStore(STORE_NAME).put(session);
+}
+
+async function bulkSaveSessionsToDB(newSessions) {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  const store = tx.objectStore(STORE_NAME);
+  newSessions.forEach(s => store.put(s));
+}
+
+async function deleteSessionFromDB(id) {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  tx.objectStore(STORE_NAME).delete(id);
+}
+
+
 let gdriveToken = null;
 let tokenClient = null;
 
@@ -60,13 +116,32 @@ const exportSingleMdBtn = document.getElementById("exportSingleMdBtn");
 const clearChatBtn = document.getElementById("clearChatBtn");
 
 // Inisialisasi
-function init() {
+//function init() {
+//  lucide.createIcons();
+//  apiKeyInput.value = settings.apiKey || "";
+//  modelSelect.value = settings.model || "gemini-1.5-pro";
+//  clientIdInput.value = settings.clientId || "";
+//  systemInstructionInput.value = settings.systemInstruction || "";
+//  modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+
+//  if (sessions.length === 0) {
+//    createNewSession();
+//  } else {
+//    loadSession(sessions[0].id);
+//  }
+//  renderHistory();
+//}
+async function init() {
   lucide.createIcons();
   apiKeyInput.value = settings.apiKey || "";
   modelSelect.value = settings.model || "gemini-1.5-pro";
   clientIdInput.value = settings.clientId || "";
   systemInstructionInput.value = settings.systemInstruction || "";
   modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+
+  // Ambil data chat dari IndexedDB
+  sessions = await getAllSessionsFromDB();
+  sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
   if (sessions.length === 0) {
     createNewSession();
@@ -75,6 +150,8 @@ function init() {
   }
   renderHistory();
 }
+
+
 
 // Session Management
 function createNewSession() {
@@ -100,14 +177,35 @@ function loadSession(id) {
   renderHistory();
 }
 
-function saveSessions() {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+//function saveSessions() {
+//  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+//  pushToDrive();
+//}
+
+//function deleteSession(id) {
+//  sessions = sessions.filter(s => s.id !== id);
+//  saveSessions();
+//  if (sessions.length === 0) {
+//    createNewSession();
+//  } else if (activeSessionId === id) {
+//    loadSession(sessions[0].id);
+//  } else {
+//    renderHistory();
+//  }
+//}
+
+async function saveSessions() {
+  // Simpan sesi aktif ke IndexedDB bukan localStorage
+  const current = sessions.find(s => s.id === activeSessionId);
+  if (current) {
+    await saveSessionToDB(current);
+  }
   pushToDrive();
 }
 
-function deleteSession(id) {
+async function deleteSession(id) {
+  await deleteSessionFromDB(id);
   sessions = sessions.filter(s => s.id !== id);
-  saveSessions();
   if (sessions.length === 0) {
     createNewSession();
   } else if (activeSessionId === id) {
@@ -116,6 +214,7 @@ function deleteSession(id) {
     renderHistory();
   }
 }
+
 
 // Render Riwayat di Sidebar
 function renderHistory(filterText = "") {
@@ -540,7 +639,8 @@ async function pullFromDrive() {
 
       if (updated) {
         sessions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+        //localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+        await bulkSaveSessionsToDB(sessions);
         renderHistory();
         if (activeSessionId) loadSession(activeSessionId);
       }
@@ -622,29 +722,66 @@ toggleApiKeyVis.addEventListener("click", () => {
 searchHistoryInput.addEventListener("input", (e) => renderHistory(e.target.value));
 
 importBtn.addEventListener("click", () => importFileInput.click());
+//importFileInput.addEventListener("change", (e) => {
+//  const file = e.target.files[0];
+//  if (!file) return;
+
+//  const reader = new FileReader();
+//  reader.onload = (event) => {
+//    try {
+//      const data = JSON.parse(event.target.result);
+//      if (Array.isArray(data)) {
+//        sessions = [...data, ...sessions];
+//      } else if (data.messages) {
+//        sessions.unshift(data);
+//      }
+//      saveSessions();
+//      loadSession(sessions[0].id);
+//      renderHistory();
+//      alert("Riwayat berhasil diimpor!");
+//    } catch (err) {
+//      alert("Format JSON tidak valid: " + err.message);
+//    }
+//  };
+//  reader.readAsText(file);
+//});
 importFileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
 
   const reader = new FileReader();
-  reader.onload = (event) => {
+  reader.onload = async (event) => {
     try {
       const data = JSON.parse(event.target.result);
+      let incoming = [];
+
       if (Array.isArray(data)) {
-        sessions = [...data, ...sessions];
+        incoming = data;
       } else if (data.messages) {
-        sessions.unshift(data);
+        incoming = [data];
       }
-      saveSessions();
+
+      if (incoming.length === 0) {
+        throw new Error("Berkas JSON tidak memuat riwayat obrolan.");
+      }
+
+      // Simpan langsung ke IndexedDB tanpa melewati limit localStorage
+      await bulkSaveSessionsToDB(incoming);
+      sessions = await getAllSessionsFromDB();
+      sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+
       loadSession(sessions[0].id);
       renderHistory();
-      alert("Riwayat berhasil diimpor!");
+      alert(`Berhasil mengimpor ${incoming.length} percakapan ke Agent AI Dothey!`);
     } catch (err) {
-      alert("Format JSON tidak valid: " + err.message);
+      alert("Gagal impor: " + err.message);
+    } finally {
+      importFileInput.value = "";
     }
   };
   reader.readAsText(file);
 });
+
 
 exportAllBtn.addEventListener("click", () => {
   const a = document.createElement("a");
