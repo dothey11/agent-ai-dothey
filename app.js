@@ -644,43 +644,61 @@ async function findDriveBackupFile() {
   return data.files && data.files.length > 0 ? data.files[0] : null;
 }
 
+// Perbarui fungsi pullFromDrive di app.js
 async function pullFromDrive() {
   if (!gdriveToken) return;
   updateSyncStatus("Menyinkronkan...", "bg-amber-500", "text-amber-400");
 
   try {
     const file = await findDriveBackupFile();
+    
+    // Jika berkas cadangan ditemukan di Google Drive
     if (file) {
       const res = await fetch(
         `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
         { headers: { Authorization: `Bearer ${gdriveToken}` } }
       );
       const cloudSessions = await res.json();
-      const localIds = new Set(sessions.map(s => s.id));
-      let updated = false;
 
-      cloudSessions.forEach(cs => {
-        if (!localIds.has(cs.id)) {
-          sessions.push(cs);
-          updated = true;
-        } else {
-          const lIdx = sessions.findIndex(s => s.id === cs.id);
-          if (cs.messages.length > sessions[lIdx].messages.length) {
-            sessions[lIdx] = cs;
+      if (Array.isArray(cloudSessions) && cloudSessions.length > 0) {
+        const localIds = new Set(sessions.map(s => s.id));
+        let updated = false;
+
+        cloudSessions.forEach(cs => {
+          if (!localIds.has(cs.id)) {
+            sessions.push(cs);
             updated = true;
+          } else {
+            const lIdx = sessions.findIndex(s => s.id === cs.id);
+            if (cs.messages.length > sessions[lIdx].messages.length) {
+              sessions[lIdx] = cs;
+              updated = true;
+            }
           }
-        }
-      });
+        });
 
-      if (updated) {
-        sessions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        // Hapus sesi kosong bawaan jika ada sesi asli yang masuk
+        sessions = sessions.filter(s => s.messages.length > 0);
+
+        sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
         await bulkSaveSessionsToDB(sessions);
         renderHistory();
-        if (activeSessionId) loadSession(activeSessionId);
+
+        // KUNCI: Langsung buka percakapan pertama yang memiliki pesan
+        if (sessions.length > 0) {
+          loadSession(sessions[0].id);
+        }
+      }
+    } else {
+      // Jika di cloud belum ada berkas, tetapi di perangkat ini sudah ada data (misal di Laptop)
+      // Otomatis unggah seluruh riwayat lokal ke Google Drive
+      if (sessions.some(s => s.messages.length > 0)) {
+        await pushToDrive();
       }
     }
     updateSyncStatus("Tersinkron", "bg-emerald-500", "text-emerald-400");
   } catch (err) {
+    console.error("Gagal sinkron:", err);
     updateSyncStatus("Gagal Sync", "bg-rose-500", "text-rose-400");
   }
 }
@@ -777,6 +795,7 @@ importFileInput.addEventListener("change", (e) => {
         const hasResponse = item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0;
         return hasPrompt || hasResponse;
       });
+      
 
       validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 
@@ -853,6 +872,8 @@ importFileInput.addEventListener("change", (e) => {
 
       loadSession(sessions[0].id);
       renderHistory();
+    
+      await pushToDrive(); // <-- Tambahkan baris ini agar data import langsung dikirim ke cloud
 
       alert(`Berhasil! ${validLogs.length} aktivitas log telah digabungkan menjadi ${formattedSessions.length} sesi percakapan utuh.`);
     } catch (err) {
