@@ -764,6 +764,8 @@ importBtn.addEventListener("click", () => importFileInput.click());
 //  reader.readAsText(file);
 //});
 // GANTI BLOK importFileInput.addEventListener LAMA DENGAN INI:
+// GANTI SELURUH BLOK importFileInput.addEventListener DI app.js DENGAN KODE INI:
+
 importFileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -774,85 +776,109 @@ importFileInput.addEventListener("change", (e) => {
       let rawData = JSON.parse(event.target.result);
       let rawList = Array.isArray(rawData) ? rawData : (rawData.conversations || [rawData]);
 
-      if (rawList.length === 0) {
-        throw new Error("Berkas JSON kosong.");
-      }
+      if (rawList.length === 0) throw new Error("Berkas JSON kosong.");
 
-      const formattedSessions = rawList.map((item, idx) => {
-        const uniqueId = item.id || `imported_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+      // WADAH PENGELOMPOKAN SESI (THREAD MAP)
+      // Mengelompokkan riwayat berdasarkan ID Obrolan Gemini yang sama
+      const threadMap = new Map();
 
-        // KASUS 1: Format standar chat (sudah memiliki array messages)
-        if (item.messages && Array.isArray(item.messages)) {
-          return {
-            id: uniqueId,
-            title: item.title || "Percakapan Impor",
-            timestamp: item.timestamp || new Date().toISOString(),
-            messages: item.messages
-          };
-        }
+      // Urutkan data secara kronologis (dari waktu terlama ke terbaru)
+      // agar pertanyaan 1 berada di atas pertanyaan lanjutan
+      rawList.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 
-        // KASUS 2: Format mentah Google Takeout (MyActivity.json)
-        // 1. Ekstrak pertanyaan pengguna (User Prompt)
+      rawList.forEach((item, idx) => {
+        // 1. Ekstrak teks pertanyaan (Prompt)
         let promptText = (item.title || item.name || "")
           .replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "")
           .trim();
 
-        // 2. Ekstrak jawaban Gemini (Model Response) dari berbagai lokasi Takeout
-        let responseText = "";
+        if (!promptText && item.messages && item.messages[0]) {
+          promptText = item.messages[0].content;
+        }
 
+        if (!promptText) return; // Lewati jika tidak ada pertanyaan
+
+        // 2. Deteksi Thread ID dari URL Google (contoh: app/eeb149a9c5226358)
+        let threadId = null;
+        const targetUrl = item.titleUrl || "";
+        const urlMatch = targetUrl.match(/app\/([a-zA-Z0-9]+)/);
+
+        if (urlMatch && urlMatch[1]) {
+          threadId = "gemini_thread_" + urlMatch[1];
+        } else if (item.id) {
+          threadId = item.id;
+        } else {
+          // Fallback jika tidak ada link: gabungkan berdasarkan kesamaan judul
+          threadId = "topic_" + promptText.slice(0, 30).toLowerCase().replace(/[^a-z0-9]/g, "_");
+        }
+
+        // 3. Ekstrak jawaban Model jika tersedia di Takeout
+        let responseText = "";
         if (item.subtitles && Array.isArray(item.subtitles) && item.subtitles.length > 0) {
-          // Google Takeout sering menyimpan jawaban di dalam subtitles[].name
           responseText = item.subtitles.map(s => s.name || "").join("\n\n");
         } else if (item.description) {
           responseText = item.description;
-        } else if (item.details && Array.isArray(item.details)) {
-          responseText = item.details.map(d => d.name || "").join("\n\n");
-        } else if (item.response || item.answer || item.output) {
-          responseText = item.response || item.answer || item.output;
+        } else if (item.response || item.answer) {
+          responseText = item.response || item.answer;
         }
 
-        // Bersihkan formatting HTML jika jawaban Google memuat tag tautan
-        if (responseText) {
-          const tempEl = document.createElement("div");
-          tempEl.innerHTML = responseText;
-          responseText = tempEl.textContent || tempEl.innerText || responseText;
+        // Format tampilan respons jika Google hanya mencatat tautan URL
+        if (!responseText.trim()) {
+          if (targetUrl) {
+            responseText = `> 📄 **Riwayat Sesi Gemini Asli**\n>\n> Google Takeout hanya mencatat log prompt untuk sesi ini.\n>\n> 🔗 [Buka percakapan asli di Google Gemini](${targetUrl})\n\n*(Ketik pertanyaan di kolom chat bawah untuk melanjutkan diskusi ini langsung dengan Gemini Pro)*`;
+          } else {
+            responseText = "*(Respons teks tidak disertakan oleh log Google Takeout)*";
+          }
         }
 
-        const fallbackResponse = responseText.trim() 
-          ? responseText.trim() 
-          : "*(Google Takeout tidak menyertakan teks respons untuk entri aktivitas ini)*";
-
-        return {
-          id: uniqueId,
-          title: promptText ? (promptText.slice(0, 36) + (promptText.length > 36 ? "..." : "")) : `Percakapan #${idx + 1}`,
-          timestamp: item.time || new Date().toISOString(),
-          messages: [
-            {
-              role: "user",
-              content: promptText || "Pertanyaan tanpa teks"
-            },
-            {
-              role: "model",
-              content: fallbackResponse
-            }
-          ]
-        };
+        // 4. KELOMPOKKAN KE DALAM THREAD YANG SAMA (ANTI-DUPLIKAT)
+        if (!threadMap.has(threadId)) {
+          // Obrolan Baru: Judul diambil dari pertanyaan pertama
+          const mainTitle = promptText.slice(0, 38) + (promptText.length > 38 ? "..." : "");
+          threadMap.set(threadId, {
+            id: threadId,
+            title: mainTitle,
+            timestamp: item.time || new Date().toISOString(),
+            messages: [
+              { role: "user", content: promptText },
+              { role: "model", content: responseText }
+            ]
+          });
+        } else {
+          // Pertanyaan Lanjutan: Masukkan ke obrolan yang sama (Bukan bikin sesi baru di sidebar)
+          const existingThread = threadMap.get(threadId);
+          existingThread.messages.push({ role: "user", content: promptText });
+          existingThread.messages.push({ role: "model", content: responseText });
+          existingThread.timestamp = item.time || existingThread.timestamp;
+        }
       });
 
-      // Simpan langsung ke IndexedDB
+      // Ubah hasil kelompok menjadi daftar sesi
+      const formattedSessions = Array.from(threadMap.values());
+
+      if (formattedSessions.length === 0) {
+        throw new Error("Tidak ada percakapan valid yang bisa diekstrak.");
+      }
+
+      // Bersihkan data lama di IndexedDB agar duplikat sebelumnya hilang total
+      const db = await openDB();
+      const txClear = db.transaction(STORE_NAME, "readwrite");
+      await txClear.objectStore(STORE_NAME).clear();
+
+      // Simpan sesi hasil pengelompokan yang sudah bersih
       await bulkSaveSessionsToDB(formattedSessions);
 
-      // Muat ulang daftar sesi ke UI
+      // Muat ulang daftar sesi ke layar
       sessions = await getAllSessionsFromDB();
+      // Urutkan percakapan terbaru di paling atas sidebar
       sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
-      if (sessions.length > 0) {
-        loadSession(sessions[0].id);
-      }
+      loadSession(sessions[0].id);
       renderHistory();
-      alert(`Berhasil mengimpor dan memproses ${formattedSessions.length} percakapan!`);
+
+      alert(`Sukses! ${rawList.length} aktivitas log telah dirapikan menjadi ${formattedSessions.length} sesi percakapan utuh.`);
     } catch (err) {
-      alert("Gagal memproses berkas JSON: " + err.message);
+      alert("Gagal memproses berkas: " + err.message);
     } finally {
       importFileInput.value = "";
     }
