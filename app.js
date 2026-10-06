@@ -2,6 +2,7 @@
  * Agent AI Dothey - Private Workspace Client
  * Engine: Google Gemini Pro API via Client-Side In-Context RAG
  * Storage: Local IndexedDB (Kapasitas Besar) & Cloud Sync (Google Drive AppData)
+ * Layout: Responsive Off-Canvas Drawer (Optimal Mobile & Desktop)
  */
 
 // =========================================================================
@@ -18,7 +19,6 @@ let stagedFiles = [];
 let gdriveToken = null;
 let tokenClient = null;
 
-// Membuka koneksi basis data IndexedDB
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -33,7 +33,6 @@ function openDB() {
   });
 }
 
-// Mengambil seluruh percakapan yang tersimpan
 async function getAllSessionsFromDB() {
   const db = await openDB();
   return new Promise((resolve) => {
@@ -44,14 +43,12 @@ async function getAllSessionsFromDB() {
   });
 }
 
-// Menyimpan satu sesi obrolan
 async function saveSessionToDB(session) {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).put(session);
 }
 
-// Menyimpan banyak sesi sekaligus (digunakan saat Impor)
 async function bulkSaveSessionsToDB(newSessions) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -70,14 +67,12 @@ async function bulkSaveSessionsToDB(newSessions) {
   });
 }
 
-// Menghapus satu sesi dari database
 async function deleteSessionFromDB(id) {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).delete(id);
 }
 
-// Mengosongkan seluruh database (pembersihan sebelum re-impor)
 async function clearAllSessionsFromDB() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -88,7 +83,6 @@ async function clearAllSessionsFromDB() {
   });
 }
 
-// Konfigurasi aplikasi default
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
   apiKey: "",
   model: "gemini-1.5-pro",
@@ -101,6 +95,9 @@ let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
 // =========================================================================
 const sidebar = document.getElementById("sidebar");
 const toggleSidebarBtn = document.getElementById("toggleSidebar");
+const sidebarBackdrop = document.getElementById("sidebarBackdrop");
+const closeSidebarMobileBtn = document.getElementById("closeSidebarMobileBtn");
+
 const historyList = document.getElementById("historyList");
 const searchHistoryInput = document.getElementById("searchHistoryInput");
 const newChatBtn = document.getElementById("newChatBtn");
@@ -111,12 +108,10 @@ const promptInput = document.getElementById("promptInput");
 const chatForm = document.getElementById("chatForm");
 const sendBtn = document.getElementById("sendBtn");
 
-// Elemen Lampiran Berkas
 const attachBtn = document.getElementById("attachBtn");
 const fileAttachmentInput = document.getElementById("fileAttachmentInput");
 const stagedFilesContainer = document.getElementById("stagedFilesContainer");
 
-// Elemen Modal Pengaturan
 const openSettingsBtn = document.getElementById("openSettingsBtn");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
@@ -128,13 +123,11 @@ const clientIdInput = document.getElementById("clientIdInput");
 const systemInstructionInput = document.getElementById("systemInstructionInput");
 const modelIndicatorBadge = document.getElementById("modelIndicatorBadge");
 
-// Elemen Sinkronisasi Google Drive
 const gdriveSyncBtn = document.getElementById("gdriveSyncBtn");
 const syncStatusText = document.getElementById("syncStatusText");
 const syncBadge = document.getElementById("syncBadge");
 const syncCloudIcon = document.getElementById("syncCloudIcon");
 
-// Elemen Ekspor dan Impor
 const importBtn = document.getElementById("importBtn");
 const importFileInput = document.getElementById("importFileInput");
 const exportAllBtn = document.getElementById("exportAllBtn");
@@ -142,7 +135,37 @@ const exportSingleMdBtn = document.getElementById("exportSingleMdBtn");
 const clearChatBtn = document.getElementById("clearChatBtn");
 
 // =========================================================================
-// 3. INISIALISASI & MANAJEMEN SESI PERCAKAPAN
+// 3. LOGIKA RESPONSIVE DRAWER SIDEBAR (Optimal di HP & Layar Desktop)
+// =========================================================================
+function openSidebarMobile() {
+  sidebar.classList.remove("-translate-x-full");
+  if (sidebarBackdrop) sidebarBackdrop.classList.remove("hidden");
+}
+
+function closeSidebarMobile() {
+  if (window.innerWidth < 768) {
+    sidebar.classList.add("-translate-x-full");
+    if (sidebarBackdrop) sidebarBackdrop.classList.add("hidden");
+  }
+}
+
+toggleSidebarBtn.addEventListener("click", () => {
+  if (window.innerWidth < 768) {
+    if (sidebar.classList.contains("-translate-x-full")) {
+      openSidebarMobile();
+    } else {
+      closeSidebarMobile();
+    }
+  } else {
+    sidebar.classList.toggle("md:hidden");
+  }
+});
+
+if (sidebarBackdrop) sidebarBackdrop.addEventListener("click", closeSidebarMobile);
+if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", closeSidebarMobile);
+
+// =========================================================================
+// 4. INISIALISASI & MANAJEMEN SESI PERCAKAPAN
 // =========================================================================
 async function init() {
   if (window.lucide) lucide.createIcons();
@@ -175,6 +198,7 @@ function createNewSession() {
   saveSessions();
   loadSession(newSession.id);
   renderHistory();
+  closeSidebarMobile();
 }
 
 function loadSession(id) {
@@ -185,6 +209,7 @@ function loadSession(id) {
   currentChatTitle.textContent = session.title;
   renderMessages(session.messages);
   renderHistory();
+  closeSidebarMobile();
 }
 
 async function saveSessions() {
@@ -207,7 +232,6 @@ async function deleteSession(id) {
   }
 }
 
-// Menampilkan daftar riwayat percakapan di bilah sisi
 function renderHistory(filterText = "") {
   historyList.innerHTML = "";
   const query = filterText.toLowerCase();
@@ -254,7 +278,7 @@ function renderHistory(filterText = "") {
 }
 
 // =========================================================================
-// 4. RENDERING TAMPILAN PESAN & MARKDOWN
+// 5. RENDERING TAMPILAN PESAN & MARKDOWN
 // =========================================================================
 function renderMessages(messages) {
   chatMessages.innerHTML = "";
@@ -274,21 +298,20 @@ function appendMessageUI(role, content, files = []) {
   const wrapper = document.createElement("div");
   const isUser = role === "user";
 
-  wrapper.className = `flex gap-3 text-sm ${isUser ? "justify-end" : "justify-start"}`;
+  wrapper.className = `flex gap-2.5 sm:gap-3 text-sm ${isUser ? "justify-end" : "justify-start"}`;
 
   const messageBox = document.createElement("div");
   messageBox.className = isUser
-    ? "bg-gradient-to-r from-teal-950/70 to-emerald-950/60 border border-teal-800/40 rounded-2xl px-4 py-2.5 max-w-[85%] text-slate-100 shadow-md"
-    : "prose-custom max-w-[92%] text-slate-200 bg-transparent py-1 w-full";
+    ? "bg-gradient-to-r from-teal-950/70 to-emerald-950/60 border border-teal-800/40 rounded-2xl px-3.5 py-2.5 max-w-[88%] text-slate-100 shadow-md"
+    : "prose-custom max-w-[94%] text-slate-200 bg-transparent py-1 w-full";
 
-  // Chip dokumen jika terdapat lampiran berkas
   if (files && files.length > 0) {
     const fileContainer = document.createElement("div");
-    fileContainer.className = "flex flex-wrap gap-2 mb-2 pb-2 border-b border-teal-800/30";
+    fileContainer.className = "flex flex-wrap gap-1.5 mb-2 pb-2 border-b border-teal-800/30";
     files.forEach(f => {
       const chip = document.createElement("div");
-      chip.className = "flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded-lg text-xs text-teal-300";
-      chip.innerHTML = `<i data-lucide="file-text" class="w-3.5 h-3.5"></i> <span class="truncate max-w-[150px]">${f.name}</span>`;
+      chip.className = "flex items-center gap-1.5 px-2 py-0.5 bg-slate-900/80 border border-slate-700/60 rounded-lg text-xs text-teal-300";
+      chip.innerHTML = `<i data-lucide="file-text" class="w-3.5 h-3.5"></i> <span class="truncate max-w-[130px]">${f.name}</span>`;
       fileContainer.appendChild(chip);
     });
     messageBox.appendChild(fileContainer);
@@ -310,7 +333,6 @@ function appendMessageUI(role, content, files = []) {
   return textNode;
 }
 
-// Memproses sintaks Markdown dan membungkus blok kode (Perbaikan pencegahan null insertBefore)
 function renderMarkdownWithCodeBlocks(markdownText) {
   if (!markdownText) return "";
 
@@ -326,12 +348,9 @@ function renderMarkdownWithCodeBlocks(markdownText) {
   const temp = document.createElement("div");
   temp.innerHTML = rawHtml;
 
-  // Mengakses elemen pre secara langsung untuk menghindari referensi parentNode yang null
   const preElements = Array.from(temp.querySelectorAll("pre"));
   preElements.forEach((pre) => {
-    if (pre.parentElement && pre.parentElement.classList.contains("code-container")) {
-      return;
-    }
+    if (pre.parentElement && pre.parentElement.classList.contains("code-container")) return;
 
     const parent = pre.parentNode;
     if (!parent) return;
@@ -340,9 +359,7 @@ function renderMarkdownWithCodeBlocks(markdownText) {
     if (codeBlock && window.hljs) {
       try {
         hljs.highlightElement(codeBlock);
-      } catch (err) {
-        // Mengabaikan galat penyorotan sintaksis
-      }
+      } catch (err) {}
     }
 
     const lang = codeBlock?.className.match(/language-(\w+)/)?.[1] || "code";
@@ -365,7 +382,6 @@ function renderMarkdownWithCodeBlocks(markdownText) {
   return temp.innerHTML;
 }
 
-// Menyiapkan tombol salin kode program
 function setupCopyCodeButtons(container) {
   container.querySelectorAll(".copy-code-btn").forEach((btn) => {
     btn.onclick = () => {
@@ -385,7 +401,7 @@ function setupCopyCodeButtons(container) {
 }
 
 // =========================================================================
-// 5. IN-CONTEXT RAG & PENGOLAHAN BERKAS TERLAMPIR
+// 6. IN-CONTEXT RAG & PENGOLAHAN FILE TERLAMPIR
 // =========================================================================
 attachBtn.addEventListener("click", () => fileAttachmentInput.click());
 
@@ -449,7 +465,7 @@ function renderStagedFiles() {
     chip.className = "flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200";
     chip.innerHTML = `
       <i data-lucide="${file.isText ? 'file-text' : 'file'}" class="w-3.5 h-3.5 text-teal-400"></i>
-      <span class="truncate max-w-[140px]">${file.name}</span>
+      <span class="truncate max-w-[120px]">${file.name}</span>
       <span class="text-[10px] text-slate-500">(${Math.round(file.size / 1024)}KB)</span>
       <button type="button" class="remove-file-btn text-slate-400 hover:text-rose-400 ml-1">
         <i data-lucide="x" class="w-3 h-3"></i>
@@ -465,7 +481,7 @@ function renderStagedFiles() {
 }
 
 // =========================================================================
-// 6. INTEGRASI GOOGLE GEMINI PRO API
+// 7. INTEGRASI GOOGLE GEMINI PRO API
 // =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
@@ -527,7 +543,6 @@ async function sendToGemini(historyMessages) {
   return data.candidates[0].content.parts[0].text;
 }
 
-// Penanganan pengiriman prompt
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = promptInput.value.trim();
@@ -574,7 +589,6 @@ chatForm.addEventListener("submit", async (e) => {
   }
 });
 
-// Penyesuaian otomatis tinggi kotak pengetikan teks
 promptInput.addEventListener("input", () => {
   promptInput.style.height = "auto";
   promptInput.style.height = promptInput.scrollHeight + "px";
@@ -588,7 +602,7 @@ promptInput.addEventListener("keydown", (e) => {
 });
 
 // =========================================================================
-// 7. SINKRONISASI GOOGLE DRIVE (Otomatis Multi-Device)
+// 8. SINKRONISASI GOOGLE DRIVE
 // =========================================================================
 function initGoogleAuth() {
   if (!window.google || !settings.clientId) return;
@@ -718,7 +732,7 @@ async function pushToDrive() {
 }
 
 // =========================================================================
-// 8. PENGATURAN KREDENSIAL & PROFIL APLIKASI
+// 9. PENGATURAN KREDENSIAL & PARSING IMPOR TAKEOUT
 // =========================================================================
 openSettingsBtn.addEventListener("click", () => settingsModal.classList.remove("hidden"));
 closeSettingsBtn.addEventListener("click", () => settingsModal.classList.add("hidden"));
@@ -741,9 +755,6 @@ toggleApiKeyVis.addEventListener("click", () => {
 
 searchHistoryInput.addEventListener("input", (e) => renderHistory(e.target.value));
 
-// =========================================================================
-// 9. IMPOR ARSIP GOOGLE TAKEOUT & PARSING CERDAS THREAD
-// =========================================================================
 importBtn.addEventListener("click", () => importFileInput.click());
 
 importFileInput.addEventListener("change", (e) => {
@@ -758,7 +769,6 @@ importFileInput.addEventListener("change", (e) => {
 
       if (rawList.length === 0) throw new Error("Berkas JSON kosong.");
 
-      // 1. Saring entri non-percakapan (seperti 'Cleared previous feedback')
       const validLogs = rawList.filter(item => {
         const title = (item.title || item.name || "").trim().toLowerCase();
         if (title === "cleared previous feedback") return false;
@@ -768,10 +778,8 @@ importFileInput.addEventListener("change", (e) => {
         return hasPrompt || hasResponse;
       });
 
-      // 2. Susun secara kronologis
       validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 
-      // 3. Kelompokkan ke dalam satu sesi utuh berdasarkan URL sesi Gemini
       const threadMap = new Map();
 
       validLogs.forEach((item, idx) => {
@@ -784,7 +792,6 @@ importFileInput.addEventListener("change", (e) => {
           promptText = item.messages[0].content;
         }
 
-        // Ekstraksi jawaban Gemini dari properti safeHtmlItem asli Google Takeout
         let responseContent = "";
         if (item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0) {
           responseContent = item.safeHtmlItem.map(s => s.html || "").join("\n\n");
@@ -838,7 +845,6 @@ importFileInput.addEventListener("change", (e) => {
         throw new Error("Tidak ada data percakapan yang valid untuk diimpor.");
       }
 
-      // Bersihkan IndexedDB sebelum memasukkan data hasil pengelompokan
       await clearAllSessionsFromDB();
       await bulkSaveSessionsToDB(formattedSessions);
 
@@ -859,7 +865,7 @@ importFileInput.addEventListener("change", (e) => {
 });
 
 // =========================================================================
-// 10. EKSPOR DOKUMEN (JSON / Markdown) & PENGHAPUSAN
+// 10. EKSPOR DOKUMEN & PEMBERSIHAN
 // =========================================================================
 exportAllBtn.addEventListener("click", () => {
   const a = document.createElement("a");
@@ -899,7 +905,6 @@ clearChatBtn.addEventListener("click", () => {
 });
 
 newChatBtn.addEventListener("click", createNewSession);
-toggleSidebarBtn.addEventListener("click", () => sidebar.classList.toggle("-ml-80"));
 
 window.addEventListener("DOMContentLoaded", () => {
   init();
