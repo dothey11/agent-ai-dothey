@@ -48,11 +48,29 @@ async function saveSessionToDB(session) {
   tx.objectStore(STORE_NAME).put(session);
 }
 
+//async function bulkSaveSessionsToDB(newSessions) {
+//  const db = await openDB();
+//  const tx = db.transaction(STORE_NAME, "readwrite");
+//  const store = tx.objectStore(STORE_NAME);
+//  newSessions.forEach(s => store.put(s));
+//}
 async function bulkSaveSessionsToDB(newSessions) {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   const store = tx.objectStore(STORE_NAME);
-  newSessions.forEach(s => store.put(s));
+
+  newSessions.forEach((s, idx) => {
+    // Pastikan 'id' selalu ada agar tidak ditolak IndexedDB
+    if (!s.id) {
+      s.id = "session_" + Date.now() + "_" + idx + "_" + Math.random().toString(36).substring(2, 7);
+    }
+    store.put(s);
+  });
+
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 async function deleteSessionFromDB(id) {
@@ -752,27 +770,63 @@ importFileInput.addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = async (event) => {
     try {
-      const data = JSON.parse(event.target.result);
-      let incoming = [];
+      let rawData = JSON.parse(event.target.result);
+      let rawList = Array.isArray(rawData) ? rawData : [rawData];
 
-      if (Array.isArray(data)) {
-        incoming = data;
-      } else if (data.messages) {
-        incoming = [data];
+      if (rawList.length === 0) {
+        throw new Error("Berkas JSON kosong.");
       }
 
-      if (incoming.length === 0) {
-        throw new Error("Berkas JSON tidak memuat riwayat obrolan.");
-      }
+      // Normalisasi: Pastikan setiap chat memiliki 'id', 'title', dan 'messages'
+      const formattedSessions = rawList.map((item, idx) => {
+        // Buat ID unik jika data lama tidak memilikinya
+        const uniqueId = item.id || `imported_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // Simpan langsung ke IndexedDB tanpa melewati limit localStorage
-      await bulkSaveSessionsToDB(incoming);
+        // 1. Jika data sudah memiliki format messages standar Dothey
+        if (item.messages && Array.isArray(item.messages)) {
+          return {
+            id: uniqueId,
+            title: item.title || "Percakapan Impor",
+            timestamp: item.timestamp || new Date().toISOString(),
+            messages: item.messages
+          };
+        }
+
+        // 2. Jika file mentah langsung dari Google Takeout (memuat 'title' / 'time' / 'header')
+        const promptText = (item.title || item.name || "")
+          .replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "")
+          .trim();
+        const timeText = item.time || new Date().toISOString();
+
+        return {
+          id: uniqueId,
+          title: promptText ? (promptText.slice(0, 36) + (promptText.length > 36 ? "..." : "")) : `Sesi Impor #${idx + 1}`,
+          timestamp: timeText,
+          messages: [
+            {
+              role: "user",
+              content: promptText || "Pertanyaan yang diarsipkan"
+            },
+            {
+              role: "model",
+              content: "(Riwayat respons diarsipkan dari akun Google)"
+            }
+          ]
+        };
+      });
+
+      // Simpan data yang sudah diberi ID ke IndexedDB
+      await bulkSaveSessionsToDB(formattedSessions);
+
+      // Muat ulang daftar sesi ke memori layar
       sessions = await getAllSessionsFromDB();
       sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
-      loadSession(sessions[0].id);
+      if (sessions.length > 0) {
+        loadSession(sessions[0].id);
+      }
       renderHistory();
-      alert(`Berhasil mengimpor ${incoming.length} percakapan ke Agent AI Dothey!`);
+      alert(`Berhasil mengimpor ${formattedSessions.length} percakapan!`);
     } catch (err) {
       alert("Gagal impor: " + err.message);
     } finally {
