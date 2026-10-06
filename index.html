@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent AI Dothey - Private RAG & Workspace Client</title>
+  <title>Agent AI Dothey</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Markdown & Code Highlight -->
@@ -30,7 +30,7 @@
           <h1 class="font-bold text-sm text-slate-100 tracking-wide leading-tight">Agent AI Dothey</h1>
           <div class="flex items-center gap-1.5 mt-0.5">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span class="text-[10px] text-teal-400 font-medium">Private RAG Engine</span>
+            <span class="text-[10px] text-teal-400 font-medium">Private RAG AI Engine</span>
           </div>
         </div>
       </div>
@@ -43,7 +43,7 @@
     <div class="p-3 border-b border-slate-800/60">
       <div class="relative flex items-center">
         <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 text-slate-500"></i>
-        <input type="text" id="searchHistoryInput" placeholder="Cari topik atau file..." 
+        <input type="text" id="searchHistoryInput" placeholder="Cari topik chat atau file..." 
           class="w-full bg-[#0a0d14] border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-500">
       </div>
     </div>
@@ -81,7 +81,7 @@
       <button id="openSettingsBtn" class="w-full flex items-center justify-between px-3 py-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 rounded-lg transition">
         <div class="flex items-center gap-2">
           <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
-          <span>Pengaturan Kunci API</span>
+          <span>Pengaturan API Key</span>
         </div>
         <span id="modelIndicatorBadge" class="text-[10px] bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-teal-400 font-mono">1.5-pro</span>
       </button>
@@ -119,16 +119,16 @@
         </div>
         <h3 class="text-base font-semibold text-slate-100 mb-1">Agent AI Dothey: Private RAG Workspace</h3>
         <p class="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
-          Unggah dokumen PDF, teks, data CSV, atau gambar langsung. Model Gemini Pro membaca dan mengekstrak jawaban langsung dari berkas Anda secara terenkripsi di browser.
+          Unggah dokumen PDF, teks, data CSV, atau gambar langsung. Model Dothey AI Pro membaca dan mengekstrak jawaban langsung dari berkas Anda secara terenkripsi di browser.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left max-w-lg w-full">
           <div class="p-3 rounded-xl border border-slate-800/80 bg-slate-900/50 text-xs text-slate-300 flex items-start gap-2.5">
             <i data-lucide="paperclip" class="w-4 h-4 text-teal-400 mt-0.5 shrink-0"></i>
-            <span><strong>Upload & RAG:</strong> Unggah laporan PDF/CSV lalu tanyakan "Ringkas dan cari poin kritis pada dokumen ini".</span>
+            <span><strong>Upload & RAG:</strong> Unggah File PDF/CSV lalu tanyakan apa saja.</span>
           </div>
           <div class="p-3 rounded-xl border border-slate-800/80 bg-slate-900/50 text-xs text-slate-300 flex items-start gap-2.5">
             <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400 mt-0.5 shrink-0"></i>
-            <span><strong>Privasi Klien:</strong> Tanpa basis data perantara. Kunci API dan data tersimpan di browser Anda & Google Drive pribadi.</span>
+            <span><strong>Privasi Klien:</strong> Tanpa basis data perantara. API KEY dan data tersimpan di browser Anda & Google Drive pribadi.</span>
           </div>
         </div>
       </div>
