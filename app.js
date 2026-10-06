@@ -763,6 +763,7 @@ importBtn.addEventListener("click", () => importFileInput.click());
 //  };
 //  reader.readAsText(file);
 //});
+// GANTI BLOK importFileInput.addEventListener LAMA DENGAN INI:
 importFileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -771,18 +772,16 @@ importFileInput.addEventListener("change", (e) => {
   reader.onload = async (event) => {
     try {
       let rawData = JSON.parse(event.target.result);
-      let rawList = Array.isArray(rawData) ? rawData : [rawData];
+      let rawList = Array.isArray(rawData) ? rawData : (rawData.conversations || [rawData]);
 
       if (rawList.length === 0) {
         throw new Error("Berkas JSON kosong.");
       }
 
-      // Normalisasi: Pastikan setiap chat memiliki 'id', 'title', dan 'messages'
       const formattedSessions = rawList.map((item, idx) => {
-        // Buat ID unik jika data lama tidak memilikinya
         const uniqueId = item.id || `imported_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
 
-        // 1. Jika data sudah memiliki format messages standar Dothey
+        // KASUS 1: Format standar chat (sudah memiliki array messages)
         if (item.messages && Array.isArray(item.messages)) {
           return {
             id: uniqueId,
@@ -792,33 +791,58 @@ importFileInput.addEventListener("change", (e) => {
           };
         }
 
-        // 2. Jika file mentah langsung dari Google Takeout (memuat 'title' / 'time' / 'header')
-        const promptText = (item.title || item.name || "")
+        // KASUS 2: Format mentah Google Takeout (MyActivity.json)
+        // 1. Ekstrak pertanyaan pengguna (User Prompt)
+        let promptText = (item.title || item.name || "")
           .replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "")
           .trim();
-        const timeText = item.time || new Date().toISOString();
+
+        // 2. Ekstrak jawaban Gemini (Model Response) dari berbagai lokasi Takeout
+        let responseText = "";
+
+        if (item.subtitles && Array.isArray(item.subtitles) && item.subtitles.length > 0) {
+          // Google Takeout sering menyimpan jawaban di dalam subtitles[].name
+          responseText = item.subtitles.map(s => s.name || "").join("\n\n");
+        } else if (item.description) {
+          responseText = item.description;
+        } else if (item.details && Array.isArray(item.details)) {
+          responseText = item.details.map(d => d.name || "").join("\n\n");
+        } else if (item.response || item.answer || item.output) {
+          responseText = item.response || item.answer || item.output;
+        }
+
+        // Bersihkan formatting HTML jika jawaban Google memuat tag tautan
+        if (responseText) {
+          const tempEl = document.createElement("div");
+          tempEl.innerHTML = responseText;
+          responseText = tempEl.textContent || tempEl.innerText || responseText;
+        }
+
+        const fallbackResponse = responseText.trim() 
+          ? responseText.trim() 
+          : "*(Google Takeout tidak menyertakan teks respons untuk entri aktivitas ini)*";
 
         return {
           id: uniqueId,
-          title: promptText ? (promptText.slice(0, 36) + (promptText.length > 36 ? "..." : "")) : `Sesi Impor #${idx + 1}`,
-          timestamp: timeText,
+          title: promptText ? (promptText.slice(0, 36) + (promptText.length > 36 ? "..." : "")) : `Percakapan #${idx + 1}`,
+          timestamp: item.time || new Date().toISOString(),
           messages: [
             {
               role: "user",
-              content: promptText || "Pertanyaan yang diarsipkan"
+              content: promptText || "Pertanyaan tanpa teks"
             },
             {
               role: "model",
-              content: "(Riwayat respons diarsipkan dari akun Google)"
+              content: fallbackResponse
             }
           ]
         };
       });
 
-      // Simpan data yang sudah diberi ID ke IndexedDB
+      // Simpan langsung ke IndexedDB
       await bulkSaveSessionsToDB(formattedSessions);
 
-      // Muat ulang daftar sesi ke memori layar
+      // Muat ulang daftar sesi ke UI
       sessions = await getAllSessionsFromDB();
       sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
@@ -826,9 +850,9 @@ importFileInput.addEventListener("change", (e) => {
         loadSession(sessions[0].id);
       }
       renderHistory();
-      alert(`Berhasil mengimpor ${formattedSessions.length} percakapan!`);
+      alert(`Berhasil mengimpor dan memproses ${formattedSessions.length} percakapan!`);
     } catch (err) {
-      alert("Gagal impor: " + err.message);
+      alert("Gagal memproses berkas JSON: " + err.message);
     } finally {
       importFileInput.value = "";
     }
