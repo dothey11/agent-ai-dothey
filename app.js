@@ -766,6 +766,8 @@ importBtn.addEventListener("click", () => importFileInput.click());
 // GANTI BLOK importFileInput.addEventListener LAMA DENGAN INI:
 // GANTI SELURUH BLOK importFileInput.addEventListener DI app.js DENGAN KODE INI:
 
+// GANTI SELURUH BLOK importFileInput.addEventListener DI app.js DENGAN INI:
+
 importFileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -778,17 +780,27 @@ importFileInput.addEventListener("change", (e) => {
 
       if (rawList.length === 0) throw new Error("Berkas JSON kosong.");
 
-      // WADAH PENGELOMPOKAN SESI (THREAD MAP)
-      // Mengelompokkan riwayat berdasarkan ID Obrolan Gemini yang sama
+      // 1. Saring entri sampah sistem (seperti 'Cleared previous feedback')
+      const validLogs = rawList.filter(item => {
+        const title = (item.title || item.name || "").trim().toLowerCase();
+        if (title === "cleared previous feedback") return false;
+        
+        // Entri harus memiliki pertanyaan atau teks balasan dari safeHtmlItem
+        const hasPrompt = title.startsWith("prompted") || title.length > 0;
+        const hasResponse = item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0;
+        return hasPrompt || hasResponse;
+      });
+
+      // 2. Urutkan secara kronologis (dari obrolan pertama ke obrolan terakhir)
+      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+
+      // 3. Kelompokkan obrolan berdasarkan Thread ID sesi Google Gemini
       const threadMap = new Map();
 
-      // Urutkan data secara kronologis (dari waktu terlama ke terbaru)
-      // agar pertanyaan 1 berada di atas pertanyaan lanjutan
-      rawList.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
-
-      rawList.forEach((item, idx) => {
-        // 1. Ekstrak teks pertanyaan (Prompt)
-        let promptText = (item.title || item.name || "")
+      validLogs.forEach((item, idx) => {
+        // A. Ambil teks Prompt Pengguna
+        let rawTitle = (item.title || item.name || "").trim();
+        let promptText = rawTitle
           .replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "")
           .trim();
 
@@ -796,87 +808,81 @@ importFileInput.addEventListener("change", (e) => {
           promptText = item.messages[0].content;
         }
 
-        if (!promptText) return; // Lewati jika tidak ada pertanyaan
+        // B. Ambil Jawaban Gemini Asli (KUNCI: Ekstrak dari safeHtmlItem)
+        let responseContent = "";
+        if (item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0) {
+          responseContent = item.safeHtmlItem.map(s => s.html || "").join("\n\n");
+        } else if (item.response || item.answer) {
+          responseContent = item.response || item.answer;
+        } else if (item.description) {
+          responseContent = item.description;
+        }
 
-        // 2. Deteksi Thread ID dari URL Google (contoh: app/eeb149a9c5226358)
+        if (!responseContent.trim()) {
+          responseContent = "*(Tidak ada rekaman respon untuk perintah ini)*";
+        }
+
+        // C. Ambil ID Thread Sesi Gemini dari details[0].url
+        let targetUrl = item.titleUrl || "";
+        if (!targetUrl && item.details && Array.isArray(item.details) && item.details.length > 0) {
+          targetUrl = item.details[0].url || item.details[0].name || "";
+        }
+
         let threadId = null;
-        const targetUrl = item.titleUrl || "";
         const urlMatch = targetUrl.match(/app\/([a-zA-Z0-9]+)/);
-
         if (urlMatch && urlMatch[1]) {
-          threadId = "gemini_thread_" + urlMatch[1];
+          threadId = "gemini_session_" + urlMatch[1];
         } else if (item.id) {
           threadId = item.id;
         } else {
-          // Fallback jika tidak ada link: gabungkan berdasarkan kesamaan judul
-          threadId = "topic_" + promptText.slice(0, 30).toLowerCase().replace(/[^a-z0-9]/g, "_");
+          // Fallback jika tidak ada link app/
+          const cleanTitle = promptText.slice(0, 24).toLowerCase().replace(/[^a-z0-9]/g, "_");
+          threadId = "session_" + (item.time || "legacy").slice(0, 10) + "_" + cleanTitle;
         }
 
-        // 3. Ekstrak jawaban Model jika tersedia di Takeout
-        let responseText = "";
-        if (item.subtitles && Array.isArray(item.subtitles) && item.subtitles.length > 0) {
-          responseText = item.subtitles.map(s => s.name || "").join("\n\n");
-        } else if (item.description) {
-          responseText = item.description;
-        } else if (item.response || item.answer) {
-          responseText = item.response || item.answer;
-        }
-
-        // Format tampilan respons jika Google hanya mencatat tautan URL
-        if (!responseText.trim()) {
-          if (targetUrl) {
-            responseText = `> 📄 **Riwayat Sesi Gemini Asli**\n>\n> Google Takeout hanya mencatat log prompt untuk sesi ini.\n>\n> 🔗 [Buka percakapan asli di Google Gemini](${targetUrl})\n\n*(Ketik pertanyaan di kolom chat bawah untuk melanjutkan diskusi ini langsung dengan Gemini Pro)*`;
-          } else {
-            responseText = "*(Respons teks tidak disertakan oleh log Google Takeout)*";
-          }
-        }
-
-        // 4. KELOMPOKKAN KE DALAM THREAD YANG SAMA (ANTI-DUPLIKAT)
+        // D. Gabungkan pertanyaan dan jawaban ke dalam satu ruang obrolan utuh
         if (!threadMap.has(threadId)) {
-          // Obrolan Baru: Judul diambil dari pertanyaan pertama
-          const mainTitle = promptText.slice(0, 38) + (promptText.length > 38 ? "..." : "");
+          // Buat sesi baru (Judul sidebar diambil dari pertanyaan pertama)
+          const firstTitle = promptText.slice(0, 38) + (promptText.length > 38 ? "..." : "");
           threadMap.set(threadId, {
             id: threadId,
-            title: mainTitle,
+            title: firstTitle || `Percakapan #${idx + 1}`,
             timestamp: item.time || new Date().toISOString(),
             messages: [
-              { role: "user", content: promptText },
-              { role: "model", content: responseText }
+              { role: "user", content: promptText || "Pertanyaan Awal" },
+              { role: "model", content: responseContent }
             ]
           });
         } else {
-          // Pertanyaan Lanjutan: Masukkan ke obrolan yang sama (Bukan bikin sesi baru di sidebar)
+          // Jika pertanyaan lanjutan dalam topik yang sama, sambungkan ke bawahnya
           const existingThread = threadMap.get(threadId);
-          existingThread.messages.push({ role: "user", content: promptText });
-          existingThread.messages.push({ role: "model", content: responseText });
+          existingThread.messages.push({ role: "user", content: promptText || "Pertanyaan Lanjutan" });
+          existingThread.messages.push({ role: "model", content: responseContent });
           existingThread.timestamp = item.time || existingThread.timestamp;
         }
       });
 
-      // Ubah hasil kelompok menjadi daftar sesi
       const formattedSessions = Array.from(threadMap.values());
-
       if (formattedSessions.length === 0) {
-        throw new Error("Tidak ada percakapan valid yang bisa diekstrak.");
+        throw new Error("Tidak ada data percakapan yang valid untuk diimpor.");
       }
 
-      // Bersihkan data lama di IndexedDB agar duplikat sebelumnya hilang total
+      // 4. Bersihkan database IndexedDB lama agar duplikat hilang total
       const db = await openDB();
       const txClear = db.transaction(STORE_NAME, "readwrite");
       await txClear.objectStore(STORE_NAME).clear();
 
-      // Simpan sesi hasil pengelompokan yang sudah bersih
+      // 5. Simpan seluruh sesi percakapan yang sudah digabung rapi
       await bulkSaveSessionsToDB(formattedSessions);
 
-      // Muat ulang daftar sesi ke layar
+      // 6. Muat ulang tampilan UI
       sessions = await getAllSessionsFromDB();
-      // Urutkan percakapan terbaru di paling atas sidebar
       sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
       loadSession(sessions[0].id);
       renderHistory();
 
-      alert(`Sukses! ${rawList.length} aktivitas log telah dirapikan menjadi ${formattedSessions.length} sesi percakapan utuh.`);
+      alert(`Berhasil! ${validLogs.length} aktivitas log telah digabungkan menjadi ${formattedSessions.length} percakapan utuh dengan seluruh isi teks respon.`);
     } catch (err) {
       alert("Gagal memproses berkas: " + err.message);
     } finally {
