@@ -1,0 +1,109 @@
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Markdown Rendering Elements */
+.prose-custom {
+  line-height: 1.7;
+}
+
+.prose-custom p {
+  margin-bottom: 0.85rem;
+}
+
+.prose-custom p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-custom h1, .prose-custom h2, .prose-custom h3 {
+  color: #f8fafc;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-custom ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin-bottom: 0.85rem;
+}
+
+.prose-custom ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin-bottom: 0.85rem;
+}
+
+.prose-custom blockquote {
+  border-left: 3px solid #14b8a6;
+  padding-left: 0.85rem;
+  color: #94a3b8;
+  font-style: italic;
+  margin: 0.75rem 0;
+}
+
+.prose-custom table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.8rem;
+}
+
+.prose-custom th, .prose-custom td {
+  border: 1px solid #1e293b;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.prose-custom th {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+
+.prose-custom :not(pre) > code {
+  background-color: #1e293b;
+  color: #2dd4bf;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+/* Code Snippet Box with 1-Click Copy */
+.code-container {
+  position: relative;
+  margin: 1rem 0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid #1e293b;
+}
+
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #0f172a;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  border-bottom: 1px solid #1e293b;
+}
+
+.code-container pre {
+  margin: 0 !important;
+  background-color: #0a0e17 !important;
+  padding: 0.85rem;
+  overflow-x: auto;
+}
