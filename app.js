@@ -234,6 +234,37 @@ async function deleteSession(id) {
   await pushToDrive();
 }
 
+// =========================================================================
+// FUNGSI GANTI NAMA (RENAME) JUDUL CHAT
+// =========================================================================
+async function renameSession(id) {
+  const session = sessions.find(s => s.id === id);
+  if (!session) return;
+
+  const currentTitle = session.title || "Percakapan Baru";
+  const newTitle = prompt("Masukkan judul baru untuk percakapan ini:", currentTitle);
+
+  // Jika pengguna menekan OK dan tidak membiarkan teks kosong
+  if (newTitle !== null && newTitle.trim() !== "") {
+    session.title = newTitle.trim();
+    
+    // Simpan ke IndexedDB lokal
+    await saveSessionToDB(session);
+
+    // Perbarui judul di bagian header atas jika chat ini sedang aktif
+    if (activeSessionId === id) {
+      currentChatTitle.textContent = session.title;
+    }
+
+    // Segarkan tampilan daftar riwayat
+    renderHistory();
+
+    // Otomatis sinkronkan judul baru ke Google Drive
+    await pushToDrive();
+  }
+}
+
+// GANTI FUNGSI renderHistory :
 function renderHistory(filterText = "") {
   historyList.innerHTML = "";
   const query = filterText.toLowerCase();
@@ -256,17 +287,26 @@ function renderHistory(filterText = "") {
     }`;
 
     item.innerHTML = `
-      <div class="flex items-center gap-2.5 truncate flex-1 mr-2">
+      <div class="flex items-center gap-2.5 truncate flex-1 mr-2 min-w-0">
         <i data-lucide="${isActive ? 'message-square-text' : 'message-square'}" class="w-3.5 h-3.5 flex-shrink-0 ${isActive ? 'text-teal-400' : 'text-slate-500'}"></i>
         <span class="truncate">${session.title}</span>
       </div>
-      <button class="delete-btn opacity-0 group-hover:opacity-100 p-1 hover:text-rose-400 text-slate-500 transition" title="Hapus">
-        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-      </button>
+      <!-- Tombol Aksi: Rename & Hapus (Otomatis muncul di HP dan saat di-hover di Laptop) -->
+      <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition shrink-0">
+        <button class="rename-btn p-1 hover:text-teal-400 text-slate-400 transition" title="Ubah Judul">
+          <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+        </button>
+        <button class="delete-btn p-1 hover:text-rose-400 text-slate-400 transition" title="Hapus">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
     `;
 
+    // Event listener untuk tombol Rename, Hapus, dan Membuka Chat
     item.addEventListener("click", (e) => {
-      if (e.target.closest(".delete-btn")) {
+      if (e.target.closest(".rename-btn")) {
+        renameSession(session.id);
+      } else if (e.target.closest(".delete-btn")) {
         deleteSession(session.id);
       } else {
         loadSession(session.id);
