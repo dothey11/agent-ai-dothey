@@ -1,6 +1,6 @@
 /**
  * Agent AI Dothey - Private Workspace Client
- * Engine: Google Gemini Pro API via Client-Side In-Context RAG
+ * Engine: Google Gemini API (Dynamic Discovery & Auto-Fallback) via Client-Side In-Context RAG
  * Storage: Local IndexedDB (Kapasitas Besar) & Cloud Sync (Google Drive AppData)
  * Layout: Responsive Off-Canvas Drawer (Optimal Mobile & Desktop)
  */
@@ -85,7 +85,7 @@ async function clearAllSessionsFromDB() {
 
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
   apiKey: "",
-  model: "gemini-1.5-pro",
+  model: "gemini-2.5-flash",
   clientId: "",
   systemInstruction: "Anda adalah Agent AI Dothey, asisten analitik tingkat lanjut yang mampu meneliti dokumen RAG, mengekstrak data dari berkas yang diunggah, dan memberikan jawaban terstruktur dengan akurasi tinggi."
 }));
@@ -135,7 +135,7 @@ const exportSingleMdBtn = document.getElementById("exportSingleMdBtn");
 const clearChatBtn = document.getElementById("clearChatBtn");
 
 // =========================================================================
-// 3. LOGIKA RESPONSIVE DRAWER SIDEBAR (Optimal di HP & Layar Desktop)
+// 3. LOGIKA RESPONSIVE DRAWER SIDEBAR (Mobile & Desktop)
 // =========================================================================
 function openSidebarMobile() {
   sidebar.classList.remove("-translate-x-full");
@@ -169,8 +169,15 @@ if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", close
 // =========================================================================
 async function init() {
   if (window.lucide) lucide.createIcons();
+
+  // Otomatis migrasikan model lama yang sudah dipensiunkan Google ke versi 2.5
+  if (settings.model === "gemini-1.5-pro" || settings.model === "gemini-2.0-flash") {
+    settings.model = "gemini-2.5-flash";
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
   apiKeyInput.value = settings.apiKey || "";
-  modelSelect.value = settings.model || "gemini-1.5-pro";
+  modelSelect.value = settings.model || "gemini-2.5-flash";
   clientIdInput.value = settings.clientId || "";
   systemInstructionInput.value = settings.systemInstruction || "";
   modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
@@ -230,13 +237,10 @@ async function deleteSession(id) {
   } else {
     renderHistory();
   }
-  // Otomatis perbarui Google Drive agar chat yang dihapus hilang permanen
+  // Sinkronisasi otomatis ke Google Drive saat sesi dihapus
   await pushToDrive();
 }
 
-// =========================================================================
-// FUNGSI GANTI NAMA (RENAME) JUDUL CHAT
-// =========================================================================
 async function renameSession(id) {
   const session = sessions.find(s => s.id === id);
   if (!session) return;
@@ -244,27 +248,19 @@ async function renameSession(id) {
   const currentTitle = session.title || "Percakapan Baru";
   const newTitle = prompt("Masukkan judul baru untuk percakapan ini:", currentTitle);
 
-  // Jika pengguna menekan OK dan tidak membiarkan teks kosong
   if (newTitle !== null && newTitle.trim() !== "") {
     session.title = newTitle.trim();
-    
-    // Simpan ke IndexedDB lokal
     await saveSessionToDB(session);
 
-    // Perbarui judul di bagian header atas jika chat ini sedang aktif
     if (activeSessionId === id) {
       currentChatTitle.textContent = session.title;
     }
 
-    // Segarkan tampilan daftar riwayat
     renderHistory();
-
-    // Otomatis sinkronkan judul baru ke Google Drive
     await pushToDrive();
   }
 }
 
-// GANTI FUNGSI renderHistory :
 function renderHistory(filterText = "") {
   historyList.innerHTML = "";
   const query = filterText.toLowerCase();
@@ -291,7 +287,6 @@ function renderHistory(filterText = "") {
         <i data-lucide="${isActive ? 'message-square-text' : 'message-square'}" class="w-3.5 h-3.5 flex-shrink-0 ${isActive ? 'text-teal-400' : 'text-slate-500'}"></i>
         <span class="truncate">${session.title}</span>
       </div>
-      <!-- Tombol Aksi: Rename & Hapus (Otomatis muncul di HP dan saat di-hover di Laptop) -->
       <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition shrink-0">
         <button class="rename-btn p-1 hover:text-teal-400 text-slate-400 transition" title="Ubah Judul">
           <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
@@ -302,7 +297,6 @@ function renderHistory(filterText = "") {
       </div>
     `;
 
-    // Event listener untuk tombol Rename, Hapus, dan Membuka Chat
     item.addEventListener("click", (e) => {
       if (e.target.closest(".rename-btn")) {
         renameSession(session.id);
@@ -523,14 +517,54 @@ function renderStagedFiles() {
 }
 
 // =========================================================================
-// 7. INTEGRASI GOOGLE GEMINI PRO API
+// 7. INTEGRASI GEMINI API (DYNAMIC MODEL DISCOVERY & SMART FALLBACK)
 // =========================================================================
+async function getActiveGeminiModel(apiKey) {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (res.ok) {
+      const data = await res.json();
+      const validModels = (data.models || [])
+        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+        .map(m => m.name.replace(/^models\//, ""));
+
+      if (settings.model && validModels.includes(settings.model)) {
+        return settings.model;
+      }
+
+      const preferred = validModels.find(m => m === "gemini-2.5-flash")
+                     || validModels.find(m => m === "gemini-2.5-pro")
+                     || validModels.find(m => m.includes("2.5"))
+                     || validModels.find(m => m.includes("flash"))
+                     || validModels[0];
+
+      if (preferred) {
+        settings.model = preferred;
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        if (modelIndicatorBadge) {
+          modelIndicatorBadge.textContent = preferred.replace("gemini-", "");
+        }
+        return preferred;
+      }
+    }
+  } catch (err) {
+    console.warn("ListModels tidak dapat diakses, beralih ke fallback default:", err);
+  }
+
+  return "gemini-2.5-flash";
+}
+
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
     throw new Error("API Key belum dipasang. Klik Pengaturan untuk memasukkan Google Gemini API Key.");
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${settings.apiKey}`;
+  const primaryModel = await getActiveGeminiModel(settings.apiKey);
+  const modelsToTry = [...new Set([
+    primaryModel,
+    "gemini-2.5-flash",
+    "gemini-2.5-pro"
+  ])];
 
   const contents = historyMessages.map(m => {
     const parts = [];
@@ -570,19 +604,40 @@ async function sendToGemini(historyMessages) {
     };
   }
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  let lastError = null;
 
-  if (!res.ok) {
-    const errData = await res.json();
-    throw new Error(errData.error?.message || `HTTP ${res.status}: Gagal menghubungi Gemini API`);
+  for (const model of modelsToTry) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content?.parts?.[0]?.text) {
+          if (settings.model !== model) {
+            settings.model = model;
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+            if (modelIndicatorBadge) {
+              modelIndicatorBadge.textContent = model.replace("gemini-", "");
+            }
+          }
+          return data.candidates[0].content.parts[0].text;
+        }
+        throw new Error("Model tidak memberikan respon atau diblokir filter keamanan.");
+      }
+
+      const errData = await res.json();
+      lastError = new Error(errData.error?.message || `HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
   }
 
-  const data = await res.json();
-  return data.candidates[0].content.parts[0].text;
+  throw lastError || new Error("Gagal menghubungi server Gemini API.");
 }
 
 chatForm.addEventListener("submit", async (e) => {
@@ -686,7 +741,6 @@ async function findDriveBackupFile() {
   return data.files && data.files.length > 0 ? data.files[0] : null;
 }
 
-// Perbarui fungsi pullFromDrive di app.js
 async function pullFromDrive() {
   if (!gdriveToken) return;
   updateSyncStatus("Menyinkronkan...", "bg-amber-500", "text-amber-400");
@@ -702,7 +756,6 @@ async function pullFromDrive() {
       const cloudSessions = await res.json();
 
       if (Array.isArray(cloudSessions)) {
-        // Samakan isi database lokal dengan cloud (agar chat yang dihapus di perangkat lain ikut hilang)
         await clearAllSessionsFromDB();
 
         if (cloudSessions.length > 0) {
@@ -714,7 +767,6 @@ async function pullFromDrive() {
             loadSession(sessions[0].id);
           }
         } else {
-          // Jika seluruh chat di cloud sudah dihapus, buat sesi baru yang bersih
           sessions = [];
           createNewSession();
         }
@@ -722,7 +774,6 @@ async function pullFromDrive() {
         renderHistory();
       }
     } else {
-      // Jika di cloud belum ada berkas cadangan, unggah data yang ada di perangkat ini
       if (sessions.some(s => s.messages && s.messages.length > 0)) {
         await pushToDrive();
       }
@@ -826,7 +877,6 @@ importFileInput.addEventListener("change", (e) => {
         const hasResponse = item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0;
         return hasPrompt || hasResponse;
       });
-      
 
       validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 
@@ -903,8 +953,8 @@ importFileInput.addEventListener("change", (e) => {
 
       loadSession(sessions[0].id);
       renderHistory();
-    
-      await pushToDrive(); // <-- Tambahkan baris ini agar data import langsung dikirim ke cloud
+
+      await pushToDrive();
 
       alert(`Berhasil! ${validLogs.length} aktivitas log telah digabungkan menjadi ${formattedSessions.length} sesi percakapan utuh.`);
     } catch (err) {
