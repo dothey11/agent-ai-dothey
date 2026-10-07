@@ -170,8 +170,13 @@ if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", close
 async function init() {
   if (window.lucide) lucide.createIcons();
 
-  // Migrasi otomatis jika model sebelumnya telah dipensiunkan oleh Google
-  const deprecatedModels = ["gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-pro"];
+  // Otomatis bersihkan seluruh model lama yang telah ditutup Google
+  const deprecatedModels = [
+    "gemini-1.5-pro", 
+    "gemini-2.0-flash", 
+    "gemini-2.5-pro", 
+    "gemini-2.5-flash"
+  ];
   if (!settings.model || deprecatedModels.includes(settings.model)) {
     settings.model = "gemini-3.8-flash";
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -519,15 +524,35 @@ function renderStagedFiles() {
 // =========================================================================
 // 7. INTEGRASI GEMINI API (SANITASI PERCAKAPAN, THINKING MODE & AUTO-RESOLVER)
 // =========================================================================
+// =========================================================================
+// INTEGRASI GEMINI API RESMI (GEMINI-3.8-FLASH & ANTI-TIMEOUT)
+// =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
     throw new Error("API Key belum dipasang. Buka Pengaturan untuk memasukkan Gemini API Key.");
   }
 
-  // 1. Sanitasi Riwayat: Gabungkan role berurutan agar alur percakapan bergantian user -> model
+  // Pembersih tag HTML dari berkas riwayat impor agar muatan token ringan
+  const cleanHtmlToText = (raw) => {
+    if (!raw) return "";
+    return raw
+      .replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, "\n```\n$1\n```\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  // Ambil maksimal 6 percakapan terakhir untuk efisiensi pemrosesan
+  const recentMessages = historyMessages.slice(-6);
+
   const sanitizedContents = [];
-  historyMessages.forEach((m) => {
+  recentMessages.forEach((m) => {
     const parts = [];
+
     if (m.files && m.files.length > 0) {
       m.files.forEach((f) => {
         if (f.isText) {
@@ -537,14 +562,17 @@ async function sendToGemini(historyMessages) {
         }
       });
     }
-    if (m.content && m.content.trim()) {
-      parts.push({ text: m.content.trim() });
+
+    const textClean = cleanHtmlToText(m.content);
+    if (textClean) {
+      parts.push({ text: textClean });
     }
 
     if (parts.length === 0) return;
 
     const role = m.role === "user" ? "user" : "model";
 
+    // Pastikan urutan pesan bergantian user -> model
     if (sanitizedContents.length > 0 && sanitizedContents[sanitizedContents.length - 1].role === role) {
       sanitizedContents[sanitizedContents.length - 1].parts.push(...parts);
     } else {
@@ -552,13 +580,12 @@ async function sendToGemini(historyMessages) {
     }
   });
 
-  // Pastikan percakapan dimulai dari role user
   while (sanitizedContents.length > 0 && sanitizedContents[0].role !== "user") {
     sanitizedContents.shift();
   }
 
   if (sanitizedContents.length === 0) {
-    throw new Error("Pesan teks atau dokumen tidak boleh kosong.");
+    throw new Error("Pesan atau dokumen tidak boleh kosong.");
   }
 
   const payload = {
@@ -575,149 +602,63 @@ async function sendToGemini(historyMessages) {
     };
   }
 
-  // Daftar prioritas model aktif
-  const modelsToTry = [
-    settings.model || "gemini-3.8-flash",
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-flash"
-  ];
+  // Gunakan model resmi yang diminta oleh Google
+  const targetModel = "gemini-3.8-flash";
 
-  let lastError = null;
-
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const model = modelsToTry[i];
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000); // Batas waktu tunggu 45 detik
-
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (res.ok) {
-        const data = await res.json();
-        const candidate = data.candidates?.[0];
-
-        if (!candidate) {
-          throw new Error("Model Google tidak mengembalikan kandidat respons.");
-        }
-
-        // Ekstraksi seluruh teks jawaban dan lewati blok 'thought' internal model
-        const replyText = (candidate.content?.parts || [])
-          .map((p) => p.text || "")
-          .filter(Boolean)
-          .join("\n\n")
-          .trim();
-
-        if (replyText) {
-          if (settings.model !== model) {
-            settings.model = model;
-            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-            if (modelIndicatorBadge) {
-              modelIndicatorBadge.textContent = model.replace("gemini-", "");
-            }
-          }
-          return replyText;
-        }
-
-        if (candidate.finishReason === "SAFETY") {
-          throw new Error("Tanggapan diblokir oleh kebijakan keamanan Google.");
-        }
-
-        throw new Error("Model mengembalikan teks kosong. Silakan kirim ulang.");
-      }
-
-      const errData = await res.json();
-      const errMsg = errData.error?.message || `HTTP ${res.status}`;
-      lastError = new Error(errMsg);
-
-      // Tangkap rekomendasi model dari respons Google jika ada pembaruan versi
-      const suggestMatch = errMsg.match(/use models\/([a-zA-Z0-9\.\-_]+)/i);
-      if (suggestMatch && suggestMatch[1]) {
-        const suggestedModel = suggestMatch[1];
-        if (!modelsToTry.includes(suggestedModel)) {
-          modelsToTry.splice(i + 1, 0, suggestedModel);
-        }
-      }
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err.name === "AbortError") {
-        lastError = new Error(`Waktu koneksi habis (Timeout) saat mengakses model ${model}.`);
-      } else {
-        lastError = err;
-      }
-    }
-  }
-
-  throw lastError || new Error("Gagal menerima jawaban dari Google Gemini API.");
-}
-
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const text = promptInput.value.trim();
-  if (!text && stagedFiles.length === 0) return;
-
-  const session = sessions.find((s) => s.id === activeSessionId);
-  if (!session) return;
-
-  const currentFiles = [...stagedFiles];
-  stagedFiles = [];
-  renderStagedFiles();
-
-  session.messages.push({
-    role: "user",
-    content: text,
-    files: currentFiles
-  });
-
-  if (session.messages.length === 1) {
-    session.title = text ? text.slice(0, 36) + (text.length > 36 ? "..." : "") : (currentFiles[0]?.name || "Percakapan Baru");
-    currentChatTitle.textContent = session.title;
-  }
-
-  appendMessageUI("user", text, currentFiles);
-  promptInput.value = "";
-  promptInput.style.height = "auto";
-  saveSessions();
-  renderHistory();
-
-  sendBtn.disabled = true;
-  const assistantBubble = appendMessageUI("model", "*Agent AI Dothey sedang menganalisis...*");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
-    const reply = await sendToGemini(session.messages);
-    session.messages.push({ role: "model", content: reply });
-    assistantBubble.innerHTML = renderMarkdownWithCodeBlocks(reply);
-    setupCopyCodeButtons(assistantBubble);
-    saveSessions();
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${settings.apiKey}`;
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error?.message || `HTTP ${res.status}: Gagal memproses permintaan.`);
+    }
+
+    const data = await res.json();
+    const candidate = data.candidates?.[0];
+
+    if (!candidate) {
+      throw new Error("Server tidak mengembalikan respons teks.");
+    }
+
+    // Ambil teks jawaban dan saring blok proses berpikir internal model
+    const replyText = (candidate.content?.parts || [])
+      .map((p) => p.text || "")
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+
+    if (!replyText) {
+      throw new Error("Teks balasan kosong atau diblokir filter keamanan.");
+    }
+
+    // Perbarui indikator model di antarmuka
+    if (settings.model !== targetModel) {
+      settings.model = targetModel;
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      if (modelIndicatorBadge) {
+        modelIndicatorBadge.textContent = targetModel.replace("gemini-", "");
+      }
+    }
+
+    return replyText;
   } catch (err) {
-    // Cabut prompt user terakhir agar alur percakapan bergantian tetap terjaga jika terjadi galat
-    session.messages.pop();
-    saveSessions();
-    assistantBubble.innerHTML = `<span class="text-rose-400 font-medium">⚠️ Error: ${err.message}</span>`;
-  } finally {
-    sendBtn.disabled = false;
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Waktu tunggu habis (Timeout 60 detik). Silakan coba kirim ulang.");
+    }
+    throw err;
   }
-});
-
-promptInput.addEventListener("input", () => {
-  promptInput.style.height = "auto";
-  promptInput.style.height = promptInput.scrollHeight + "px";
-});
-
-promptInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    chatForm.dispatchEvent(new Event("submit"));
-  }
-});
+}
 
 // =========================================================================
 // 8. SINKRONISASI GOOGLE DRIVE
