@@ -170,14 +170,15 @@ if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", close
 async function init() {
   if (window.lucide) lucide.createIcons();
 
-  // Otomatis migrasikan model lama yang sudah dipensiunkan Google ke versi 2.5
-  if (settings.model === "gemini-1.5-pro" || settings.model === "gemini-2.0-flash") {
-    settings.model = "gemini-2.5-flash";
+  // Otomatis bersihkan model lama yang ditutup Google
+  const deprecatedModels = ["gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-pro"];
+  if (!settings.model || deprecatedModels.includes(settings.model)) {
+    settings.model = "gemini-3.8-flash";
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }
 
   apiKeyInput.value = settings.apiKey || "";
-  modelSelect.value = settings.model || "gemini-2.5-flash";
+  modelSelect.value = settings.model || "gemini-3.8-flash";
   clientIdInput.value = settings.clientId || "";
   systemInstructionInput.value = settings.systemInstruction || "";
   modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
@@ -554,59 +555,46 @@ async function getActiveGeminiModel(apiKey) {
   return "gemini-2.5-flash";
 }
 
+// =========================================================================
+// INTEGRASI GEMINI API DENGAN SMART AUTO-RESOLVER & FALLBACK RESMI
+// =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
-    throw new Error("API Key belum dipasang. Klik Pengaturan untuk memasukkan Google Gemini API Key.");
+    throw new Error("API Key belum dipasang. Buka Pengaturan untuk memasukkan Gemini API Key.");
   }
 
-  const primaryModel = await getActiveGeminiModel(settings.apiKey);
-  const modelsToTry = [...new Set([
-    primaryModel,
-    "gemini-2.5-flash",
-    "gemini-2.5-pro"
-  ])];
+  // Daftar model aktif terbaru sesuai arahan Google
+  const modelsToTry = [
+    settings.model || "gemini-3.8-flash",
+    "gemini-3.8-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash"
+  ];
 
   const contents = historyMessages.map(m => {
     const parts = [];
-
     if (m.files && m.files.length > 0) {
       m.files.forEach(f => {
         if (f.isText) {
-          parts.push({
-            text: `[DOKUMEN TERLAMPIR: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\`\n`
-          });
+          parts.push({ text: `[DOKUMEN TERLAMPIR: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\`\n` });
         } else {
-          parts.push({
-            inlineData: {
-              mimeType: f.type,
-              data: f.base64
-            }
-          });
+          parts.push({ inlineData: { mimeType: f.type, data: f.base64 } });
         }
       });
     }
-
-    if (m.content) {
-      parts.push({ text: m.content });
-    }
-
-    return {
-      role: m.role === "user" ? "user" : "model",
-      parts: parts
-    };
+    if (m.content) parts.push({ text: m.content });
+    return { role: m.role === "user" ? "user" : "model", parts };
   });
 
   const payload = { contents };
-
   if (settings.systemInstruction && settings.systemInstruction.trim()) {
-    payload.systemInstruction = {
-      parts: [{ text: settings.systemInstruction }]
-    };
+    payload.systemInstruction = { parts: [{ text: settings.systemInstruction }] };
   }
 
   let lastError = null;
 
-  for (const model of modelsToTry) {
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
     try {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
       const res = await fetch(endpoint, {
@@ -618,6 +606,7 @@ async function sendToGemini(historyMessages) {
       if (res.ok) {
         const data = await res.json();
         if (data.candidates && data.candidates.length > 0 && data.candidates[0].content?.parts?.[0]?.text) {
+          // Simpan model yang sukses agar panggilan berikutnya langsung instan
           if (settings.model !== model) {
             settings.model = model;
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -631,7 +620,17 @@ async function sendToGemini(historyMessages) {
       }
 
       const errData = await res.json();
-      lastError = new Error(errData.error?.message || `HTTP ${res.status}`);
+      const errMsg = errData.error?.message || `HTTP ${res.status}`;
+      lastError = new Error(errMsg);
+
+      // OTOMATIS AMBIL NAMA MODEL DARI PESAN ERROR GOOGLE JIKA ADA PERUBAHAN VERSI
+      const suggestMatch = errMsg.match(/use models\/([a-zA-Z0-9\.\-_]+)/i);
+      if (suggestMatch && suggestMatch[1]) {
+        const suggestedModel = suggestMatch[1];
+        if (!modelsToTry.includes(suggestedModel)) {
+          modelsToTry.splice(i + 1, 0, suggestedModel);
+        }
+      }
     } catch (err) {
       lastError = err;
     }
