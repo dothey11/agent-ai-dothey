@@ -1,12 +1,12 @@
 /**
  * Agent AI Dothey - Private Workspace Client
- * Engine: Google Gemini API (Dynamic Discovery & Auto-Fallback) via Client-Side In-Context RAG
+ * Engine: Google Gemini API (Dynamic Model Discovery, Auto-Fallback & Thinking Mode Support)
  * Storage: Local IndexedDB (Kapasitas Besar) & Cloud Sync (Google Drive AppData)
  * Layout: Responsive Off-Canvas Drawer (Optimal Mobile & Desktop)
  */
 
 // =========================================================================
-// 1. INISIALISASI DATABASE LOKAL (IndexedDB)
+// 1. BASIS DATA LOKAL (IndexedDB)
 // =========================================================================
 const DB_NAME = "AgentDotheyDB";
 const DB_VERSION = 1;
@@ -85,7 +85,7 @@ async function clearAllSessionsFromDB() {
 
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
   apiKey: "",
-  model: "gemini-2.5-flash",
+  model: "gemini-3.8-flash",
   clientId: "",
   systemInstruction: "Anda adalah Agent AI Dothey, asisten analitik tingkat lanjut yang mampu meneliti dokumen RAG, mengekstrak data dari berkas yang diunggah, dan memberikan jawaban terstruktur dengan akurasi tinggi."
 }));
@@ -135,7 +135,7 @@ const exportSingleMdBtn = document.getElementById("exportSingleMdBtn");
 const clearChatBtn = document.getElementById("clearChatBtn");
 
 // =========================================================================
-// 3. LOGIKA RESPONSIVE DRAWER SIDEBAR (Mobile & Desktop)
+// 3. RESPONSIVE DRAWER SIDEBAR (Mobile & Desktop)
 // =========================================================================
 function openSidebarMobile() {
   sidebar.classList.remove("-translate-x-full");
@@ -165,12 +165,12 @@ if (sidebarBackdrop) sidebarBackdrop.addEventListener("click", closeSidebarMobil
 if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", closeSidebarMobile);
 
 // =========================================================================
-// 4. INISIALISASI & MANAJEMEN SESI PERCAKAPAN
+// 4. MANAJEMEN SESI PERCAKAPAN
 // =========================================================================
 async function init() {
   if (window.lucide) lucide.createIcons();
 
-  // Otomatis bersihkan model lama yang ditutup Google
+  // Migrasi otomatis jika model sebelumnya telah dipensiunkan oleh Google
   const deprecatedModels = ["gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.5-pro"];
   if (!settings.model || deprecatedModels.includes(settings.model)) {
     settings.model = "gemini-3.8-flash";
@@ -238,7 +238,6 @@ async function deleteSession(id) {
   } else {
     renderHistory();
   }
-  // Sinkronisasi otomatis ke Google Drive saat sesi dihapus
   await pushToDrive();
 }
 
@@ -315,7 +314,7 @@ function renderHistory(filterText = "") {
 }
 
 // =========================================================================
-// 5. RENDERING TAMPILAN PESAN & MARKDOWN
+// 5. TAMPILAN PESAN & MARKDOWN
 // =========================================================================
 function renderMessages(messages) {
   chatMessages.innerHTML = "";
@@ -438,7 +437,7 @@ function setupCopyCodeButtons(container) {
 }
 
 // =========================================================================
-// 6. IN-CONTEXT RAG & PENGOLAHAN FILE TERLAMPIR
+// 6. IN-CONTEXT RAG & BERKAS TERLAMPIR
 // =========================================================================
 attachBtn.addEventListener("click", () => fileAttachmentInput.click());
 
@@ -518,63 +517,19 @@ function renderStagedFiles() {
 }
 
 // =========================================================================
-// 7. INTEGRASI GEMINI API (DYNAMIC MODEL DISCOVERY & SMART FALLBACK)
-// =========================================================================
-async function getActiveGeminiModel(apiKey) {
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    if (res.ok) {
-      const data = await res.json();
-      const validModels = (data.models || [])
-        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
-        .map(m => m.name.replace(/^models\//, ""));
-
-      if (settings.model && validModels.includes(settings.model)) {
-        return settings.model;
-      }
-
-      const preferred = validModels.find(m => m === "gemini-2.5-flash")
-                     || validModels.find(m => m === "gemini-2.5-pro")
-                     || validModels.find(m => m.includes("2.5"))
-                     || validModels.find(m => m.includes("flash"))
-                     || validModels[0];
-
-      if (preferred) {
-        settings.model = preferred;
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-        if (modelIndicatorBadge) {
-          modelIndicatorBadge.textContent = preferred.replace("gemini-", "");
-        }
-        return preferred;
-      }
-    }
-  } catch (err) {
-    console.warn("ListModels tidak dapat diakses, beralih ke fallback default:", err);
-  }
-
-  return "gemini-2.5-flash";
-}
-
-// =========================================================================
-// INTEGRASI GEMINI API DENGAN SMART AUTO-RESOLVER & FALLBACK RESMI
+// 7. INTEGRASI GEMINI API (SANITASI PERCAKAPAN, THINKING MODE & AUTO-RESOLVER)
 // =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
     throw new Error("API Key belum dipasang. Buka Pengaturan untuk memasukkan Gemini API Key.");
   }
 
-  // Daftar model aktif terbaru sesuai arahan Google
-  const modelsToTry = [
-    settings.model || "gemini-3.8-flash",
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-flash"
-  ];
-
-  const contents = historyMessages.map(m => {
+  // 1. Sanitasi Riwayat: Gabungkan role berurutan agar alur percakapan bergantian user -> model
+  const sanitizedContents = [];
+  historyMessages.forEach((m) => {
     const parts = [];
     if (m.files && m.files.length > 0) {
-      m.files.forEach(f => {
+      m.files.forEach((f) => {
         if (f.isText) {
           parts.push({ text: `[DOKUMEN TERLAMPIR: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\`\n` });
         } else {
@@ -582,31 +537,85 @@ async function sendToGemini(historyMessages) {
         }
       });
     }
-    if (m.content) parts.push({ text: m.content });
-    return { role: m.role === "user" ? "user" : "model", parts };
+    if (m.content && m.content.trim()) {
+      parts.push({ text: m.content.trim() });
+    }
+
+    if (parts.length === 0) return;
+
+    const role = m.role === "user" ? "user" : "model";
+
+    if (sanitizedContents.length > 0 && sanitizedContents[sanitizedContents.length - 1].role === role) {
+      sanitizedContents[sanitizedContents.length - 1].parts.push(...parts);
+    } else {
+      sanitizedContents.push({ role, parts });
+    }
   });
 
-  const payload = { contents };
-  if (settings.systemInstruction && settings.systemInstruction.trim()) {
-    payload.systemInstruction = { parts: [{ text: settings.systemInstruction }] };
+  // Pastikan percakapan dimulai dari role user
+  while (sanitizedContents.length > 0 && sanitizedContents[0].role !== "user") {
+    sanitizedContents.shift();
   }
+
+  if (sanitizedContents.length === 0) {
+    throw new Error("Pesan teks atau dokumen tidak boleh kosong.");
+  }
+
+  const payload = {
+    contents: sanitizedContents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 8192
+    }
+  };
+
+  if (settings.systemInstruction && settings.systemInstruction.trim()) {
+    payload.systemInstruction = {
+      parts: [{ text: settings.systemInstruction.trim() }]
+    };
+  }
+
+  // Daftar prioritas model aktif
+  const modelsToTry = [
+    settings.model || "gemini-3.8-flash",
+    "gemini-3.8-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash"
+  ];
 
   let lastError = null;
 
   for (let i = 0; i < modelsToTry.length; i++) {
     const model = modelsToTry[i];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // Batas waktu tunggu 45 detik
+
     try {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       if (res.ok) {
         const data = await res.json();
-        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content?.parts?.[0]?.text) {
-          // Simpan model yang sukses agar panggilan berikutnya langsung instan
+        const candidate = data.candidates?.[0];
+
+        if (!candidate) {
+          throw new Error("Model Google tidak mengembalikan kandidat respons.");
+        }
+
+        // Ekstraksi seluruh teks jawaban dan lewati blok 'thought' internal model
+        const replyText = (candidate.content?.parts || [])
+          .map((p) => p.text || "")
+          .filter(Boolean)
+          .join("\n\n")
+          .trim();
+
+        if (replyText) {
           if (settings.model !== model) {
             settings.model = model;
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -614,16 +623,21 @@ async function sendToGemini(historyMessages) {
               modelIndicatorBadge.textContent = model.replace("gemini-", "");
             }
           }
-          return data.candidates[0].content.parts[0].text;
+          return replyText;
         }
-        throw new Error("Model tidak memberikan respon atau diblokir filter keamanan.");
+
+        if (candidate.finishReason === "SAFETY") {
+          throw new Error("Tanggapan diblokir oleh kebijakan keamanan Google.");
+        }
+
+        throw new Error("Model mengembalikan teks kosong. Silakan kirim ulang.");
       }
 
       const errData = await res.json();
       const errMsg = errData.error?.message || `HTTP ${res.status}`;
       lastError = new Error(errMsg);
 
-      // OTOMATIS AMBIL NAMA MODEL DARI PESAN ERROR GOOGLE JIKA ADA PERUBAHAN VERSI
+      // Tangkap rekomendasi model dari respons Google jika ada pembaruan versi
       const suggestMatch = errMsg.match(/use models\/([a-zA-Z0-9\.\-_]+)/i);
       if (suggestMatch && suggestMatch[1]) {
         const suggestedModel = suggestMatch[1];
@@ -632,11 +646,16 @@ async function sendToGemini(historyMessages) {
         }
       }
     } catch (err) {
-      lastError = err;
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        lastError = new Error(`Waktu koneksi habis (Timeout) saat mengakses model ${model}.`);
+      } else {
+        lastError = err;
+      }
     }
   }
 
-  throw lastError || new Error("Gagal menghubungi server Gemini API.");
+  throw lastError || new Error("Gagal menerima jawaban dari Google Gemini API.");
 }
 
 chatForm.addEventListener("submit", async (e) => {
@@ -644,7 +663,7 @@ chatForm.addEventListener("submit", async (e) => {
   const text = promptInput.value.trim();
   if (!text && stagedFiles.length === 0) return;
 
-  const session = sessions.find(s => s.id === activeSessionId);
+  const session = sessions.find((s) => s.id === activeSessionId);
   if (!session) return;
 
   const currentFiles = [...stagedFiles];
@@ -678,6 +697,9 @@ chatForm.addEventListener("submit", async (e) => {
     setupCopyCodeButtons(assistantBubble);
     saveSessions();
   } catch (err) {
+    // Cabut prompt user terakhir agar alur percakapan bergantian tetap terjaga jika terjadi galat
+    session.messages.pop();
+    saveSessions();
     assistantBubble.innerHTML = `<span class="text-rose-400 font-medium">⚠️ Error: ${err.message}</span>`;
   } finally {
     sendBtn.disabled = false;
@@ -877,7 +899,7 @@ importFileInput.addEventListener("change", (e) => {
         return hasPrompt || hasResponse;
       });
 
-      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(a.time || 0));
 
       const threadMap = new Map();
 
