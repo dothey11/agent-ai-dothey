@@ -669,7 +669,7 @@ chatForm.addEventListener("submit", async (e) => {
   renderHistory();
 
   sendBtn.disabled = true;
-  const assistantBubble = appendMessageUI("model", "*Agent AI Dothey sedang membaca dokumen & menganalisis...*");
+  const assistantBubble = appendMessageUI("model", "*Agent AI Dothey sedang menganalisis...*");
 
   try {
     const reply = await sendToGemini(session.messages);
