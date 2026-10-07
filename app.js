@@ -1,6 +1,6 @@
 /**
  * Agent AI Dothey - Private Workspace Client
- * Engine: Google Gemini API (Dynamic Model Discovery, Auto-Fallback & Thinking Mode Support)
+ * Engine: Google Gemini API (Dynamic Discovery, Auto-Fallback & Thinking Mode Support)
  * Storage: Local IndexedDB (Kapasitas Besar) & Cloud Sync (Google Drive AppData)
  * Layout: Responsive Off-Canvas Drawer (Optimal Mobile & Desktop)
  */
@@ -170,11 +170,11 @@ if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", close
 async function init() {
   if (window.lucide) lucide.createIcons();
 
-  // Otomatis bersihkan seluruh model lama yang telah ditutup Google
+  // Migrasi otomatis jika model sebelumnya telah dipensiunkan oleh Google
   const deprecatedModels = [
-    "gemini-1.5-pro", 
-    "gemini-2.0-flash", 
-    "gemini-2.5-pro", 
+    "gemini-1.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.5-pro",
     "gemini-2.5-flash"
   ];
   if (!settings.model || deprecatedModels.includes(settings.model)) {
@@ -216,7 +216,7 @@ function createNewSession() {
 
 function loadSession(id) {
   activeSessionId = id;
-  const session = sessions.find(s => s.id === id);
+  const session = sessions.find((s) => s.id === id);
   if (!session) return;
 
   currentChatTitle.textContent = session.title;
@@ -226,7 +226,7 @@ function loadSession(id) {
 }
 
 async function saveSessions() {
-  const current = sessions.find(s => s.id === activeSessionId);
+  const current = sessions.find((s) => s.id === activeSessionId);
   if (current) {
     await saveSessionToDB(current);
   }
@@ -235,7 +235,7 @@ async function saveSessions() {
 
 async function deleteSession(id) {
   await deleteSessionFromDB(id);
-  sessions = sessions.filter(s => s.id !== id);
+  sessions = sessions.filter((s) => s.id !== id);
   if (sessions.length === 0) {
     createNewSession();
   } else if (activeSessionId === id) {
@@ -247,7 +247,7 @@ async function deleteSession(id) {
 }
 
 async function renameSession(id) {
-  const session = sessions.find(s => s.id === id);
+  const session = sessions.find((s) => s.id === id);
   if (!session) return;
 
   const currentTitle = session.title || "Percakapan Baru";
@@ -270,9 +270,10 @@ function renderHistory(filterText = "") {
   historyList.innerHTML = "";
   const query = filterText.toLowerCase();
 
-  const filtered = sessions.filter(s =>
-    s.title.toLowerCase().includes(query) ||
-    s.messages.some(m => m.content && m.content.toLowerCase().includes(query))
+  const filtered = sessions.filter(
+    (s) =>
+      s.title.toLowerCase().includes(query) ||
+      s.messages.some((m) => m.content && m.content.toLowerCase().includes(query))
   );
 
   if (filtered.length === 0) {
@@ -280,16 +281,20 @@ function renderHistory(filterText = "") {
     return;
   }
 
-  filtered.forEach(session => {
+  filtered.forEach((session) => {
     const isActive = session.id === activeSessionId;
     const item = document.createElement("div");
     item.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer text-xs transition ${
-      isActive ? "bg-slate-800 text-slate-100 font-medium border border-slate-700/60" : "text-slate-400 hover:bg-slate-800/40 hover:text-slate-200"
+      isActive
+        ? "bg-slate-800 text-slate-100 font-medium border border-slate-700/60"
+        : "text-slate-400 hover:bg-slate-800/40 hover:text-slate-200"
     }`;
 
     item.innerHTML = `
       <div class="flex items-center gap-2.5 truncate flex-1 mr-2 min-w-0">
-        <i data-lucide="${isActive ? 'message-square-text' : 'message-square'}" class="w-3.5 h-3.5 flex-shrink-0 ${isActive ? 'text-teal-400' : 'text-slate-500'}"></i>
+        <i data-lucide="${isActive ? "message-square-text" : "message-square"}" class="w-3.5 h-3.5 flex-shrink-0 ${
+      isActive ? "text-teal-400" : "text-slate-500"
+    }"></i>
         <span class="truncate">${session.title}</span>
       </div>
       <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition shrink-0">
@@ -319,7 +324,7 @@ function renderHistory(filterText = "") {
 }
 
 // =========================================================================
-// 5. TAMPILAN PESAN & MARKDOWN
+// 5. RENDERING TAMPILAN PESAN & MARKDOWN
 // =========================================================================
 function renderMessages(messages) {
   chatMessages.innerHTML = "";
@@ -330,7 +335,7 @@ function renderMessages(messages) {
   }
   welcomeMessage.classList.add("hidden");
 
-  messages.forEach(msg => appendMessageUI(msg.role, msg.content, msg.files));
+  messages.forEach((msg) => appendMessageUI(msg.role, msg.content, msg.files));
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
@@ -349,9 +354,10 @@ function appendMessageUI(role, content, files = []) {
   if (files && files.length > 0) {
     const fileContainer = document.createElement("div");
     fileContainer.className = "flex flex-wrap gap-1.5 mb-2 pb-2 border-b border-teal-800/30";
-    files.forEach(f => {
+    files.forEach((f) => {
       const chip = document.createElement("div");
-      chip.className = "flex items-center gap-1.5 px-2 py-0.5 bg-slate-900/80 border border-slate-700/60 rounded-lg text-xs text-teal-300";
+      chip.className =
+        "flex items-center gap-1.5 px-2 py-0.5 bg-slate-900/80 border border-slate-700/60 rounded-lg text-xs text-teal-300";
       chip.innerHTML = `<i data-lucide="file-text" class="w-3.5 h-3.5"></i> <span class="truncate max-w-[130px]">${f.name}</span>`;
       fileContainer.appendChild(chip);
     });
@@ -379,9 +385,7 @@ function renderMarkdownWithCodeBlocks(markdownText) {
 
   let rawHtml = "";
   try {
-    rawHtml = (typeof marked !== "undefined" && marked.parse)
-      ? marked.parse(markdownText)
-      : markdownText;
+    rawHtml = typeof marked !== "undefined" && marked.parse ? marked.parse(markdownText) : markdownText;
   } catch (err) {
     rawHtml = markdownText;
   }
@@ -456,7 +460,8 @@ fileAttachmentInput.addEventListener("change", async (e) => {
 });
 
 async function processSelectedFile(file) {
-  const isText = file.type.includes("text") ||
+  const isText =
+    file.type.includes("text") ||
     file.name.endsWith(".txt") ||
     file.name.endsWith(".md") ||
     file.name.endsWith(".csv") ||
@@ -503,9 +508,10 @@ function renderStagedFiles() {
 
   stagedFiles.forEach((file, index) => {
     const chip = document.createElement("div");
-    chip.className = "flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200";
+    chip.className =
+      "flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200";
     chip.innerHTML = `
-      <i data-lucide="${file.isText ? 'file-text' : 'file'}" class="w-3.5 h-3.5 text-teal-400"></i>
+      <i data-lucide="${file.isText ? "file-text" : "file"}" class="w-3.5 h-3.5 text-teal-400"></i>
       <span class="truncate max-w-[120px]">${file.name}</span>
       <span class="text-[10px] text-slate-500">(${Math.round(file.size / 1024)}KB)</span>
       <button type="button" class="remove-file-btn text-slate-400 hover:text-rose-400 ml-1">
@@ -524,30 +530,32 @@ function renderStagedFiles() {
 // =========================================================================
 // 7. INTEGRASI GEMINI API (SANITASI PERCAKAPAN, THINKING MODE & AUTO-RESOLVER)
 // =========================================================================
-// =========================================================================
-// INTEGRASI GEMINI API RESMI (GEMINI-3.8-FLASH & ANTI-TIMEOUT)
-// =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
     throw new Error("API Key belum dipasang. Buka Pengaturan untuk memasukkan Gemini API Key.");
   }
 
-  // Pembersih tag HTML dari berkas riwayat impor agar muatan token ringan
+  // Pembersih tag HTML khusus hasil impor Takeout
   const cleanHtmlToText = (raw) => {
     if (!raw) return "";
+    if (!/<[a-z][\s\S]*>/i.test(raw)) return raw.trim();
     return raw
       .replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, "\n```\n$1\n```\n")
+      .replace(/<br\s*[\/]?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<\/h[1-6]>/gi, "\n\n")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/g, " ")
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
       .replace(/&amp;/g, "&")
-      .replace(/\s+/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n\s*\n/g, "\n\n")
       .trim();
   };
 
-  // Ambil maksimal 6 percakapan terakhir untuk efisiensi pemrosesan
-  const recentMessages = historyMessages.slice(-6);
+  // Batasi pengambilan riwayat terakhir agar beban token ringan dan cepat
+  const recentMessages = historyMessages.slice(-8);
 
   const sanitizedContents = [];
   recentMessages.forEach((m) => {
@@ -572,7 +580,7 @@ async function sendToGemini(historyMessages) {
 
     const role = m.role === "user" ? "user" : "model";
 
-    // Pastikan urutan pesan bergantian user -> model
+    // Gabungkan pesan berurutan dengan role sama agar alur percakapan bergantian rapi
     if (sanitizedContents.length > 0 && sanitizedContents[sanitizedContents.length - 1].role === role) {
       sanitizedContents[sanitizedContents.length - 1].parts.push(...parts);
     } else {
@@ -580,12 +588,13 @@ async function sendToGemini(historyMessages) {
     }
   });
 
+  // Pastikan alur percakapan diawali oleh user
   while (sanitizedContents.length > 0 && sanitizedContents[0].role !== "user") {
     sanitizedContents.shift();
   }
 
   if (sanitizedContents.length === 0) {
-    throw new Error("Pesan atau dokumen tidak boleh kosong.");
+    throw new Error("Pesan teks atau dokumen tidak boleh kosong.");
   }
 
   const payload = {
@@ -602,66 +611,160 @@ async function sendToGemini(historyMessages) {
     };
   }
 
-  // Gunakan model resmi yang diminta oleh Google
-  const targetModel = "gemini-3.8-flash";
+  // Daftar prioritas model aktif terkini
+  const candidateModels = [
+    settings.model,
+    "gemini-3.8-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash"
+  ].filter(Boolean);
+  const modelsToTry = [...new Set(candidateModels)];
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  let lastError = null;
 
-  try {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${settings.apiKey}`;
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 detik timeout per percobaan
 
-    if (!res.ok) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        const candidate = data.candidates?.[0];
+
+        if (!candidate) {
+          throw new Error("Model Google tidak mengembalikan kandidat respons.");
+        }
+
+        // Ekstraksi teks jawaban dan lewati blok 'thought' internal model
+        let parts = (candidate.content?.parts || []).filter((p) => !p.thought);
+        if (parts.length === 0) parts = candidate.content?.parts || [];
+        const replyText = parts
+          .map((p) => p.text || "")
+          .filter(Boolean)
+          .join("\n\n")
+          .trim();
+
+        if (replyText) {
+          if (settings.model !== model) {
+            settings.model = model;
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+            if (modelIndicatorBadge) {
+              modelIndicatorBadge.textContent = model.replace("gemini-", "");
+            }
+          }
+          return replyText;
+        }
+
+        if (candidate.finishReason === "SAFETY") {
+          throw new Error("Tanggapan diblokir oleh filter keamanan Google.");
+        }
+
+        throw new Error("Model mengembalikan teks kosong.");
+      }
+
       const errData = await res.json();
-      throw new Error(errData.error?.message || `HTTP ${res.status}: Gagal memproses permintaan.`);
-    }
+      const errMsg = errData.error?.message || `HTTP ${res.status}`;
+      lastError = new Error(errMsg);
 
-    const data = await res.json();
-    const candidate = data.candidates?.[0];
-
-    if (!candidate) {
-      throw new Error("Server tidak mengembalikan respons teks.");
-    }
-
-    // Ambil teks jawaban dan saring blok proses berpikir internal model
-    const replyText = (candidate.content?.parts || [])
-      .map((p) => p.text || "")
-      .filter(Boolean)
-      .join("\n\n")
-      .trim();
-
-    if (!replyText) {
-      throw new Error("Teks balasan kosong atau diblokir filter keamanan.");
-    }
-
-    // Perbarui indikator model di antarmuka
-    if (settings.model !== targetModel) {
-      settings.model = targetModel;
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      if (modelIndicatorBadge) {
-        modelIndicatorBadge.textContent = targetModel.replace("gemini-", "");
+      // Tangkap rekomendasi model dari respons error Google jika ada perubahan rilis
+      const suggestMatch = errMsg.match(/use models\/([a-zA-Z0-9\.\-_]+)/i);
+      if (suggestMatch && suggestMatch[1]) {
+        const suggestedModel = suggestMatch[1];
+        if (!modelsToTry.includes(suggestedModel)) {
+          modelsToTry.splice(i + 1, 0, suggestedModel);
+        }
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        lastError = new Error(`Waktu tunggu habis (Timeout) saat mengakses model ${model}.`);
+      } else {
+        lastError = err;
       }
     }
-
-    return replyText;
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === "AbortError") {
-      throw new Error("Waktu tunggu habis (Timeout 60 detik). Silakan coba kirim ulang.");
-    }
-    throw err;
   }
+
+  throw lastError || new Error("Gagal menerima jawaban dari Google Gemini API.");
 }
 
 // =========================================================================
-// 8. SINKRONISASI GOOGLE DRIVE
+// 8. FORM SUBMIT & INPUT EVENT LISTENERS (DIPERBAIKI UTUH)
+// =========================================================================
+chatForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = promptInput.value.trim();
+  if (!text && stagedFiles.length === 0) return;
+
+  const session = sessions.find((s) => s.id === activeSessionId);
+  if (!session) return;
+
+  const currentFiles = [...stagedFiles];
+  stagedFiles = [];
+  renderStagedFiles();
+
+  session.messages.push({
+    role: "user",
+    content: text,
+    files: currentFiles
+  });
+
+  if (session.messages.length === 1) {
+    session.title = text
+      ? text.slice(0, 36) + (text.length > 36 ? "..." : "")
+      : currentFiles[0]?.name || "Percakapan Baru";
+    currentChatTitle.textContent = session.title;
+  }
+
+  appendMessageUI("user", text, currentFiles);
+  promptInput.value = "";
+  promptInput.style.height = "auto";
+  saveSessions();
+  renderHistory();
+
+  sendBtn.disabled = true;
+  const assistantBubble = appendMessageUI("model", "*Agent AI Dothey sedang menganalisis...*");
+
+  try {
+    const reply = await sendToGemini(session.messages);
+    session.messages.push({ role: "model", content: reply });
+    assistantBubble.innerHTML = renderMarkdownWithCodeBlocks(reply);
+    setupCopyCodeButtons(assistantBubble);
+    saveSessions();
+  } catch (err) {
+    // Hapus prompt user terakhir jika panggilan gagal agar alur percakapan tidak rusak
+    session.messages.pop();
+    saveSessions();
+    assistantBubble.innerHTML = `<span class="text-rose-400 font-medium">⚠️ Error: ${err.message}</span>`;
+  } finally {
+    sendBtn.disabled = false;
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+});
+
+promptInput.addEventListener("input", () => {
+  promptInput.style.height = "auto";
+  promptInput.style.height = promptInput.scrollHeight + "px";
+});
+
+promptInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    chatForm.dispatchEvent(new Event("submit"));
+  }
+});
+
+// =========================================================================
+// 9. SINKRONISASI GOOGLE DRIVE
 // =========================================================================
 function initGoogleAuth() {
   if (!window.google || !settings.clientId) return;
@@ -674,7 +777,7 @@ function initGoogleAuth() {
       gdriveToken = response.access_token;
       updateSyncStatus("Tersambung", "bg-emerald-500", "text-emerald-400");
       await pullFromDrive();
-    },
+    }
   });
 }
 
@@ -711,10 +814,9 @@ async function pullFromDrive() {
     const file = await findDriveBackupFile();
 
     if (file) {
-      const res = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-        { headers: { Authorization: `Bearer ${gdriveToken}` } }
-      );
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+        headers: { Authorization: `Bearer ${gdriveToken}` }
+      });
       const cloudSessions = await res.json();
 
       if (Array.isArray(cloudSessions)) {
@@ -725,7 +827,7 @@ async function pullFromDrive() {
           sessions = await getAllSessionsFromDB();
           sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
-          if (!sessions.find(s => s.id === activeSessionId)) {
+          if (!sessions.find((s) => s.id === activeSessionId)) {
             loadSession(sessions[0].id);
           }
         } else {
@@ -736,7 +838,7 @@ async function pullFromDrive() {
         renderHistory();
       }
     } else {
-      if (sessions.some(s => s.messages && s.messages.length > 0)) {
+      if (sessions.some((s) => s.messages && s.messages.length > 0)) {
         await pushToDrive();
       }
     }
@@ -794,7 +896,7 @@ async function pushToDrive() {
 }
 
 // =========================================================================
-// 9. PENGATURAN KREDENSIAL & PARSING IMPOR TAKEOUT
+// 10. PENGATURAN KREDENSIAL & PARSING IMPOR TAKEOUT
 // =========================================================================
 openSettingsBtn.addEventListener("click", () => settingsModal.classList.remove("hidden"));
 closeSettingsBtn.addEventListener("click", () => settingsModal.classList.add("hidden"));
@@ -827,11 +929,11 @@ importFileInput.addEventListener("change", (e) => {
   reader.onload = async (event) => {
     try {
       const rawData = JSON.parse(event.target.result);
-      const rawList = Array.isArray(rawData) ? rawData : (rawData.conversations || [rawData]);
+      const rawList = Array.isArray(rawData) ? rawData : rawData.conversations || [rawData];
 
       if (rawList.length === 0) throw new Error("Berkas JSON kosong.");
 
-      const validLogs = rawList.filter(item => {
+      const validLogs = rawList.filter((item) => {
         const title = (item.title || item.name || "").trim().toLowerCase();
         if (title === "cleared previous feedback") return false;
 
@@ -840,15 +942,13 @@ importFileInput.addEventListener("change", (e) => {
         return hasPrompt || hasResponse;
       });
 
-      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(a.time || 0));
+      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 
       const threadMap = new Map();
 
       validLogs.forEach((item, idx) => {
         const rawTitle = (item.title || item.name || "").trim();
-        let promptText = rawTitle
-          .replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "")
-          .trim();
+        let promptText = rawTitle.replace(/^(Prompted|Prompt:|Asked|Berinteraksi dengan Gemini)\s*/i, "").trim();
 
         if (!promptText && item.messages && item.messages[0]) {
           promptText = item.messages[0].content;
@@ -856,7 +956,7 @@ importFileInput.addEventListener("change", (e) => {
 
         let responseContent = "";
         if (item.safeHtmlItem && Array.isArray(item.safeHtmlItem) && item.safeHtmlItem.length > 0) {
-          responseContent = item.safeHtmlItem.map(s => s.html || "").join("\n\n");
+          responseContent = item.safeHtmlItem.map((s) => s.html || "").join("\n\n");
         } else if (item.response || item.answer) {
           responseContent = item.response || item.answer;
         } else if (item.description) {
@@ -929,7 +1029,7 @@ importFileInput.addEventListener("change", (e) => {
 });
 
 // =========================================================================
-// 10. EKSPOR DOKUMEN & PEMBERSIHAN
+// 11. EKSPOR DOKUMEN & PEMBERSIHAN
 // =========================================================================
 exportAllBtn.addEventListener("click", () => {
   const a = document.createElement("a");
@@ -940,26 +1040,26 @@ exportAllBtn.addEventListener("click", () => {
 });
 
 exportSingleMdBtn.addEventListener("click", () => {
-  const session = sessions.find(s => s.id === activeSessionId);
+  const session = sessions.find((s) => s.id === activeSessionId);
   if (!session || session.messages.length === 0) return;
 
   let md = `# ${session.title}\n*Waktu: ${new Date(session.timestamp).toLocaleString("id-ID")}*\n\n---\n\n`;
-  session.messages.forEach(m => {
+  session.messages.forEach((m) => {
     md += `${m.role === "user" ? "### 👤 Pengguna" : "### 🤖 Agent AI Dothey"}\n\n`;
     if (m.files && m.files.length > 0) {
-      md += `*Lampiran: ${m.files.map(f => f.name).join(", ")}*\n\n`;
+      md += `*Lampiran: ${m.files.map((f) => f.name).join(", ")}*\n\n`;
     }
     md += `${m.content}\n\n---\n\n`;
   });
 
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
-  a.download = `${session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+  a.download = `${session.title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.md`;
   a.click();
 });
 
 clearChatBtn.addEventListener("click", () => {
-  const session = sessions.find(s => s.id === activeSessionId);
+  const session = sessions.find((s) => s.id === activeSessionId);
   if (!session) return;
   if (confirm("Hapus seluruh pesan di obrolan ini?")) {
     session.messages = [];
