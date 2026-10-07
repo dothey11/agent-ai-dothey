@@ -230,6 +230,8 @@ async function deleteSession(id) {
   } else {
     renderHistory();
   }
+  // Otomatis perbarui Google Drive agar chat yang dihapus hilang permanen
+  await pushToDrive();
 }
 
 function renderHistory(filterText = "") {
@@ -651,8 +653,7 @@ async function pullFromDrive() {
 
   try {
     const file = await findDriveBackupFile();
-    
-    // Jika berkas cadangan ditemukan di Google Drive
+
     if (file) {
       const res = await fetch(
         `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
@@ -660,45 +661,35 @@ async function pullFromDrive() {
       );
       const cloudSessions = await res.json();
 
-      if (Array.isArray(cloudSessions) && cloudSessions.length > 0) {
-        const localIds = new Set(sessions.map(s => s.id));
-        let updated = false;
+      if (Array.isArray(cloudSessions)) {
+        // Samakan isi database lokal dengan cloud (agar chat yang dihapus di perangkat lain ikut hilang)
+        await clearAllSessionsFromDB();
 
-        cloudSessions.forEach(cs => {
-          if (!localIds.has(cs.id)) {
-            sessions.push(cs);
-            updated = true;
-          } else {
-            const lIdx = sessions.findIndex(s => s.id === cs.id);
-            if (cs.messages.length > sessions[lIdx].messages.length) {
-              sessions[lIdx] = cs;
-              updated = true;
-            }
+        if (cloudSessions.length > 0) {
+          await bulkSaveSessionsToDB(cloudSessions);
+          sessions = await getAllSessionsFromDB();
+          sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+
+          if (!sessions.find(s => s.id === activeSessionId)) {
+            loadSession(sessions[0].id);
           }
-        });
-
-        // Hapus sesi kosong bawaan jika ada sesi asli yang masuk
-        sessions = sessions.filter(s => s.messages.length > 0);
-
-        sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-        await bulkSaveSessionsToDB(sessions);
-        renderHistory();
-
-        // KUNCI: Langsung buka percakapan pertama yang memiliki pesan
-        if (sessions.length > 0) {
-          loadSession(sessions[0].id);
+        } else {
+          // Jika seluruh chat di cloud sudah dihapus, buat sesi baru yang bersih
+          sessions = [];
+          createNewSession();
         }
+
+        renderHistory();
       }
     } else {
-      // Jika di cloud belum ada berkas, tetapi di perangkat ini sudah ada data (misal di Laptop)
-      // Otomatis unggah seluruh riwayat lokal ke Google Drive
-      if (sessions.some(s => s.messages.length > 0)) {
+      // Jika di cloud belum ada berkas cadangan, unggah data yang ada di perangkat ini
+      if (sessions.some(s => s.messages && s.messages.length > 0)) {
         await pushToDrive();
       }
     }
     updateSyncStatus("Tersinkron", "bg-emerald-500", "text-emerald-400");
   } catch (err) {
-    console.error("Gagal sinkron:", err);
+    console.error("Gagal sinkron dari Drive:", err);
     updateSyncStatus("Gagal Sync", "bg-rose-500", "text-rose-400");
   }
 }
