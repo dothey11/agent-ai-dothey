@@ -1,8 +1,8 @@
 /**
- * Agent AI Dothey - Private Workspace Client
- * Engine: Google Gemini API (Dynamic Discovery, Auto-Fallback & Thinking Mode Support)
- * Storage: Local IndexedDB (Kapasitas Besar) & Cloud Sync (Google Drive AppData)
- * Layout: Responsive Off-Canvas Drawer (Optimal Mobile & Desktop)
+ * Agent AI Dothey - Private Workspace Client (Final Stable Release)
+ * Engine: Google Gemini API (gemini-3.8-flash & gemini-3.1-pro-preview) via In-Context RAG
+ * Storage: Local IndexedDB & Cloud Sync (Google Drive AppData)
+ * Layout: Responsive Off-Canvas Drawer (Mobile & Desktop)
  */
 
 // =========================================================================
@@ -83,12 +83,20 @@ async function clearAllSessionsFromDB() {
   });
 }
 
+// Konfigurasi awal dengan pemaksaan model aktif
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || JSON.stringify({
   apiKey: "",
   model: "gemini-3.8-flash",
   clientId: "",
   systemInstruction: "Anda adalah Agent AI Dothey, asisten analitik tingkat lanjut yang mampu meneliti dokumen RAG, mengekstrak data dari berkas yang diunggah, dan memberikan jawaban terstruktur dengan akurasi tinggi."
 }));
+
+// Pembersihan model kadaluarsa dari memori peramban
+const deprecatedModels = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash"];
+if (!settings.model || deprecatedModels.includes(settings.model)) {
+  settings.model = "gemini-3.8-flash";
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
 
 // =========================================================================
 // 2. REFERENSI ELEMEN DOM
@@ -170,13 +178,6 @@ if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", close
 async function init() {
   if (window.lucide) lucide.createIcons();
 
-  // Migrasi otomatis jika model sebelumnya telah dipensiunkan oleh Google
-  const deprecatedModels = [
-    "gemini-1.5-pro",
-    "gemini-2.0-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash"
-  ];
   if (!settings.model || deprecatedModels.includes(settings.model)) {
     settings.model = "gemini-3.8-flash";
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -186,7 +187,9 @@ async function init() {
   modelSelect.value = settings.model || "gemini-3.8-flash";
   clientIdInput.value = settings.clientId || "";
   systemInstructionInput.value = settings.systemInstruction || "";
-  modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+  if (modelIndicatorBadge) {
+    modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+  }
 
   sessions = await getAllSessionsFromDB();
   sessions.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
@@ -324,7 +327,7 @@ function renderHistory(filterText = "") {
 }
 
 // =========================================================================
-// 5. RENDERING TAMPILAN PESAN & MARKDOWN
+// 5. TAMPILAN PESAN & MARKDOWN
 // =========================================================================
 function renderMessages(messages) {
   chatMessages.innerHTML = "";
@@ -528,14 +531,25 @@ function renderStagedFiles() {
 }
 
 // =========================================================================
-// 7. INTEGRASI GEMINI API (SANITASI PERCAKAPAN, THINKING MODE & AUTO-RESOLVER)
+// 7. INTEGRASI GEMINI API (GEMINI-3.8-FLASH DEFAULT & FALLBACK RESMI)
 // =========================================================================
 async function sendToGemini(historyMessages) {
   if (!settings.apiKey) {
     throw new Error("API Key belum dipasang. Buka Pengaturan untuk memasukkan Gemini API Key.");
   }
 
-  // Pembersih tag HTML khusus hasil impor Takeout
+  // Sanitasi model agar tidak memanggil versi kedaluwarsa
+  let activeModel = settings.model || "gemini-3.8-flash";
+  if (deprecatedModels.includes(activeModel)) {
+    activeModel = "gemini-3.8-flash";
+    settings.model = activeModel;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    if (modelIndicatorBadge) {
+      modelIndicatorBadge.textContent = activeModel.replace("gemini-", "");
+    }
+  }
+
+  // Pembersih tag HTML dari berkas riwayat ekspor Takeout
   const cleanHtmlToText = (raw) => {
     if (!raw) return "";
     if (!/<[a-z][\s\S]*>/i.test(raw)) return raw.trim();
@@ -554,10 +568,9 @@ async function sendToGemini(historyMessages) {
       .trim();
   };
 
-  // Batasi pengambilan riwayat terakhir agar beban token ringan dan cepat
   const recentMessages = historyMessages.slice(-8);
-
   const sanitizedContents = [];
+
   recentMessages.forEach((m) => {
     const parts = [];
 
@@ -580,7 +593,6 @@ async function sendToGemini(historyMessages) {
 
     const role = m.role === "user" ? "user" : "model";
 
-    // Gabungkan pesan berurutan dengan role sama agar alur percakapan bergantian rapi
     if (sanitizedContents.length > 0 && sanitizedContents[sanitizedContents.length - 1].role === role) {
       sanitizedContents[sanitizedContents.length - 1].parts.push(...parts);
     } else {
@@ -588,7 +600,6 @@ async function sendToGemini(historyMessages) {
     }
   });
 
-  // Pastikan alur percakapan diawali oleh user
   while (sanitizedContents.length > 0 && sanitizedContents[0].role !== "user") {
     sanitizedContents.shift();
   }
@@ -611,21 +622,20 @@ async function sendToGemini(historyMessages) {
     };
   }
 
-  // Daftar prioritas model aktif terkini
-  const candidateModels = [
-    settings.model,
+  // Prioritas panggilan model aktif
+  const modelsToTry = [
+    activeModel,
     "gemini-3.8-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-flash"
+    "gemini-3.1-pro-preview"
   ].filter(Boolean);
-  const modelsToTry = [...new Set(candidateModels)];
 
+  const uniqueModels = [...new Set(modelsToTry)];
   let lastError = null;
 
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const model = modelsToTry[i];
+  for (let i = 0; i < uniqueModels.length; i++) {
+    const model = uniqueModels[i];
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 detik timeout per percobaan
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
@@ -645,7 +655,7 @@ async function sendToGemini(historyMessages) {
           throw new Error("Model Google tidak mengembalikan kandidat respons.");
         }
 
-        // Ekstraksi teks jawaban dan lewati blok 'thought' internal model
+        // Ambil teks murni dan lewati blok 'thought'
         let parts = (candidate.content?.parts || []).filter((p) => !p.thought);
         if (parts.length === 0) parts = candidate.content?.parts || [];
         const replyText = parts
@@ -676,12 +686,12 @@ async function sendToGemini(historyMessages) {
       const errMsg = errData.error?.message || `HTTP ${res.status}`;
       lastError = new Error(errMsg);
 
-      // Tangkap rekomendasi model dari respons error Google jika ada perubahan rilis
+      // Tangkap saran model dari Google jika ada rekomendasi rilis baru
       const suggestMatch = errMsg.match(/use models\/([a-zA-Z0-9\.\-_]+)/i);
       if (suggestMatch && suggestMatch[1]) {
         const suggestedModel = suggestMatch[1];
-        if (!modelsToTry.includes(suggestedModel)) {
-          modelsToTry.splice(i + 1, 0, suggestedModel);
+        if (!uniqueModels.includes(suggestedModel)) {
+          uniqueModels.splice(i + 1, 0, suggestedModel);
         }
       }
     } catch (err) {
@@ -698,7 +708,7 @@ async function sendToGemini(historyMessages) {
 }
 
 // =========================================================================
-// 8. FORM SUBMIT & INPUT EVENT LISTENERS (DIPERBAIKI UTUH)
+// 8. PENANGAN FORMULIR OBROLAN (SUBMIT & INPUT EVENT LISTENERS)
 // =========================================================================
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -741,7 +751,6 @@ chatForm.addEventListener("submit", async (e) => {
     setupCopyCodeButtons(assistantBubble);
     saveSessions();
   } catch (err) {
-    // Hapus prompt user terakhir jika panggilan gagal agar alur percakapan tidak rusak
     session.messages.pop();
     saveSessions();
     assistantBubble.innerHTML = `<span class="text-rose-400 font-medium">⚠️ Error: ${err.message}</span>`;
@@ -908,7 +917,9 @@ saveSettingsBtn.addEventListener("click", () => {
   settings.systemInstruction = systemInstructionInput.value.trim();
 
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+  if (modelIndicatorBadge) {
+    modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+  }
   settingsModal.classList.add("hidden");
   if (settings.clientId) initGoogleAuth();
 });
@@ -942,7 +953,7 @@ importFileInput.addEventListener("change", (e) => {
         return hasPrompt || hasResponse;
       });
 
-      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+      validLogs.sort((a, b) => new Date(a.time || 0) - new Date(a.time || 0));
 
       const threadMap = new Map();
 
