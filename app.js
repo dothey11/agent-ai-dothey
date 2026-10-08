@@ -178,17 +178,27 @@ if (closeSidebarMobileBtn) closeSidebarMobileBtn.addEventListener("click", close
 async function init() {
   if (window.lucide) lucide.createIcons();
 
-  if (!settings.model || deprecatedModels.includes(settings.model)) {
+  // Bersihkan model yang kuotanya bernilai 0 di akun gratis
+  const zeroQuotaModels = [
+    "gemini-1.5-pro", 
+    "gemini-2.0-flash", 
+    "gemini-2.5-pro", 
+    "gemini-2.5-flash",
+    "gemini-3.1-pro",
+    "gemini-3.1-pro-preview"
+  ];
+
+  if (!settings.model || zeroQuotaModels.includes(settings.model)) {
     settings.model = "gemini-3.8-flash";
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }
 
   apiKeyInput.value = settings.apiKey || "";
-  modelSelect.value = settings.model || "gemini-3.8-flash";
+  modelSelect.value = "gemini-3.8-flash";
   clientIdInput.value = settings.clientId || "";
   systemInstructionInput.value = settings.systemInstruction || "";
   if (modelIndicatorBadge) {
-    modelIndicatorBadge.textContent = settings.model.replace("gemini-", "");
+    modelIndicatorBadge.textContent = "3.8-flash";
   }
 
   sessions = await getAllSessionsFromDB();
@@ -538,18 +548,7 @@ async function sendToGemini(historyMessages) {
     throw new Error("API Key belum dipasang. Buka Pengaturan untuk memasukkan Gemini API Key.");
   }
 
-  // Sanitasi model agar tidak memanggil versi kedaluwarsa
-  let activeModel = settings.model || "gemini-3.8-flash";
-  if (deprecatedModels.includes(activeModel)) {
-    activeModel = "gemini-3.8-flash";
-    settings.model = activeModel;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    if (modelIndicatorBadge) {
-      modelIndicatorBadge.textContent = activeModel.replace("gemini-", "");
-    }
-  }
-
-  // Pembersih tag HTML dari berkas riwayat ekspor Takeout
+  // Pembersih tag HTML dari berkas riwayat impor
   const cleanHtmlToText = (raw) => {
     if (!raw) return "";
     if (!/<[a-z][\s\S]*>/i.test(raw)) return raw.trim();
@@ -622,89 +621,63 @@ async function sendToGemini(historyMessages) {
     };
   }
 
-  // Prioritas panggilan model aktif
-  const modelsToTry = [
-    activeModel,
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview"
-  ].filter(Boolean);
+  // Kunci pemanggilan hanya ke model Flash aktif yang memiliki kuota gratis
+  const targetModel = "gemini-3.8-flash";
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-  const uniqueModels = [...new Set(modelsToTry)];
-  let lastError = null;
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${settings.apiKey}`;
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
-  for (let i = 0; i < uniqueModels.length; i++) {
-    const model = uniqueModels[i];
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-    try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (res.ok) {
-        const data = await res.json();
-        const candidate = data.candidates?.[0];
-
-        if (!candidate) {
-          throw new Error("Model Google tidak mengembalikan kandidat respons.");
-        }
-
-        // Ambil teks murni dan lewati blok 'thought'
-        let parts = (candidate.content?.parts || []).filter((p) => !p.thought);
-        if (parts.length === 0) parts = candidate.content?.parts || [];
-        const replyText = parts
-          .map((p) => p.text || "")
-          .filter(Boolean)
-          .join("\n\n")
-          .trim();
-
-        if (replyText) {
-          if (settings.model !== model) {
-            settings.model = model;
-            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-            if (modelIndicatorBadge) {
-              modelIndicatorBadge.textContent = model.replace("gemini-", "");
-            }
-          }
-          return replyText;
-        }
-
-        if (candidate.finishReason === "SAFETY") {
-          throw new Error("Tanggapan diblokir oleh filter keamanan Google.");
-        }
-
-        throw new Error("Model mengembalikan teks kosong.");
-      }
-
+    if (!res.ok) {
       const errData = await res.json();
       const errMsg = errData.error?.message || `HTTP ${res.status}`;
-      lastError = new Error(errMsg);
-
-      // Tangkap saran model dari Google jika ada rekomendasi rilis baru
-      const suggestMatch = errMsg.match(/use models\/([a-zA-Z0-9\.\-_]+)/i);
-      if (suggestMatch && suggestMatch[1]) {
-        const suggestedModel = suggestMatch[1];
-        if (!uniqueModels.includes(suggestedModel)) {
-          uniqueModels.splice(i + 1, 0, suggestedModel);
-        }
+      
+      if (res.status === 429 || errMsg.includes("Quota exceeded")) {
+        throw new Error("Batas kuota harian akun Google Anda sedang penuh. Coba gunakan API Key baru dari Google AI Studio.");
       }
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err.name === "AbortError") {
-        lastError = new Error(`Waktu tunggu habis (Timeout) saat mengakses model ${model}.`);
-      } else {
-        lastError = err;
-      }
+      throw new Error(errMsg);
     }
-  }
 
-  throw lastError || new Error("Gagal menerima jawaban dari Google Gemini API.");
+    const data = await res.json();
+    const candidate = data.candidates?.[0];
+
+    if (!candidate) {
+      throw new Error("Model Google tidak mengembalikan kandidat respons.");
+    }
+
+    // Ambil isi teks dan lewati blok proses berpikir internal
+    let parts = (candidate.content?.parts || []).filter((p) => !p.thought);
+    if (parts.length === 0) parts = candidate.content?.parts || [];
+    const replyText = parts
+      .map((p) => p.text || "")
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+
+    if (replyText) {
+      return replyText;
+    }
+
+    if (candidate.finishReason === "SAFETY") {
+      throw new Error("Tanggapan diblokir oleh filter keamanan Google.");
+    }
+
+    throw new Error("Model mengembalikan teks kosong.");
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Waktu tunggu habis (Timeout 60 detik). Silakan coba kirim ulang.");
+    }
+    throw err;
+  }
 }
 
 // =========================================================================
